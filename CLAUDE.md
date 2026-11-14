@@ -103,11 +103,11 @@ The user wants to give input before every advance. Therefore:
 
 ### Hackathon data (downloaded by the user)
 - **Coverage: the whole planet**, bbox `[-180, -90, 180, 90]` (min lon, min lat, max lon, max lat).
-- **The user has not reviewed all files yet.** The first task is to inventory them (see §7, step 1).
+- **Inventoried in step 1 (2026-11-14):** 59 files, 53.3 GB, 660.9 M rows. Exact figures, the file id → date range map and all oddities are in `docs/DATA.md`.
 - Location and status (inventory as of 2026-11-14). **All files are already unzipped plain CSVs** (the original ZIPs are gone). Folder names follow the FIRMS product codes:
 ```
 data/
-├── MODIS/    # Terra + Aqua — 26 × fire_archive_M-C61_<id>.csv (60–420 MB each)
+├── MODIS/    # Terra + Aqua — 27 × fire_archive_M-C61_<id>.csv (60–420 MB each)
 │             #               + fire_nrt_M-C61_845758.csv                        → ~8.5 GB total
 ├── SV_C2/    # VIIRS S-NPP  — 15 × fire_archive_SV-C2_<id>.csv (1.4–1.8 GB each)
 │             #               + fire_nrt_SV-C2_845761.csv                        → ~22.4 GB total
@@ -118,19 +118,22 @@ data/
 ```
   **≈ 50 GB of raw CSV in total.** Individual VIIRS files are up to ~1.8 GB: never open them whole in memory.
 - **Confirmed:** each sensor has exactly one NRT file, and it shares its id with the newest archive file (`845758` MODIS, `845761` S-NPP, `845759` NOAA-20, `845760` NOAA-21). That id is the most recent stretch, split into SP (`fire_archive_*`) and NRT (`fire_nrt_*`).
-- **Hypotheses to verify (do not assume):**
-  - Each archive file is probably **one year** (26 MODIS = 2000–2025 + 2026; 15 S-NPP = 2012–2026; 9 NOAA-20 = 2018–2026; 4 NOAA-21 = 2023–2026). File ids are not in chronological order across sensors: check the actual `acq_date` range of each file and build an id → year map.
-  - **Possible SP/NRT overlap** in the newest id: deduplicate by keeping SP when both exist for the same date.
-  - The MODIS `845649` file is unusually small (61 MB): check whether it is a partial year or a gap.
+- **Verified in step 1 (details in `docs/DATA.md`):**
+  - Archive files are rolling ~1-year chunks, **not calendar years** (27 MODIS, 15 S-NPP, 9 NOAA-20, 4 NOAA-21). Partition by `acq_date`, never by file.
+  - **SP and NRT do not overlap.** SP ends 2026-08-31 (MODIS) and 2026-07-31 (VIIRS). NRT runs to 2026-11-13, except S-NPP, which stops on 2026-11-02.
+  - **Four whole days are duplicated** between consecutive SP files (2014-01-22 and 2015-01-23, in both MODIS and S-NPP; 144,085 rows). The adapter must deduplicate.
+  - **Whole-day outages** exist for every satellite (Terra 57 days, Aqua 26, S-NPP 49, NOAA-20 6, NOAA-21 2). Monthly counts have to account for them.
+  - The MODIS `845649` file is small because it only covers 2011-11-21 → 2012-01-19. There is no gap.
 - The practice data (Spain/Brazil, per country) is still in `D:\nasa_space_apps_prep\data\`, useful for comparing results.
 
-### Usual FIRMS columns (verify against the real files)
+### FIRMS columns (verified on all 59 files in step 1)
 - **MODIS:** `latitude, longitude, brightness, scan, track, acq_date, acq_time, satellite, instrument, confidence, version, bright_t31, frp, daynight, type`
-- **VIIRS:** same, but with `bright_ti4` and `bright_ti5` instead of `brightness` and `bright_t31`.
-- `acq_time` is in **UTC** (HHMM format, may come without leading zeros).
-- `confidence`: **MODIS is numeric (0–100)**; **VIIRS is categorical** (`l`/`n`/`h`, or `low`/`nominal`/`high`).
-- `satellite`: check the real values for each sensor (e.g. `Terra`/`Aqua`, `N`, `N20`/`1`, `N21`…) and map them to the internal schema.
-- `type`: 0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source (refineries, gas flares), 3 = offshore. **Check that it exists in every file: NRT files usually lack it.** If missing, filter static sources by persistence (pixels that burn almost daily for years) or inherit the classification from SP cells.
+- **VIIRS:** identical header in these files (`brightness` and `bright_t31`, not `bright_ti4` and `bright_ti5` as in the practice data).
+- `acq_time` is in **UTC**, always 4 digits (`HHMM`). Read it as text, or the leading zeros are lost.
+- `confidence`: **MODIS is numeric (0–100)**; **VIIRS is categorical** (`l`/`n`/`h` only).
+- `satellite`: `Terra`, `Aqua`, `SNPP`, `N20`, `N21`. Map `SNPP` → `N` in the internal schema. S-NPP rows have `instrument = SNPP`, so take the sensor from the folder or file-name code.
+- `type`: 0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source (refineries, gas flares), 3 = offshore. **It exists in the SP files only: the four NRT files lack it.** There, filter static sources by persistence (pixels that burn almost daily for years) or inherit the classification from SP cells.
+- `frp` is ≤ 0 in 0.02 % of rows (zeros everywhere, negatives in MODIS SP and VIIRS NRT).
 
 ### Optional auxiliary data
 - Administrative boundaries: **Natural Earth** or **GADM** (selection by country or province).
@@ -237,7 +240,7 @@ data/
 **Hackathon (this repo):**
 - [x] Global data downloaded and unzipped: MODIS, VIIRS S-NPP, NOAA-20 and NOAA-21 (≈ 50 GB CSV in `data/`).
 - [x] Repo set up: `CLAUDE.md`, `.gitignore`, `.claude/settings.json` (read access to the prep folder).
-- [ ] Step 1: data inventory.
+- [x] Step 1: data inventory (`pipeline/inventory.py`, results in `docs/DATA.md`).
 - [ ] Step 2: prep review and porting plan.
 - [ ] Steps 3–4: global adapter and Parquet.
 - [ ] Step 5: cleaning and aggregation.
