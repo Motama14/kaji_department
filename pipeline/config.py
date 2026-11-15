@@ -148,12 +148,16 @@ def hotspots_dir() -> Path:
     return HOTSPOTS_DIR
 
 
-def hotspots_sql() -> str:
-    """FROM-clause expression that reads the whole detections table."""
-    return (
-        f"read_parquet('{sql_path(hotspots_dir())}/**/*.parquet', hive_partitioning=true, "
-        "hive_types={'sensor': VARCHAR, 'satellite': VARCHAR, 'year': SMALLINT})"
-    )
+def hotspots_sql(files: list[Path] | None = None) -> str:
+    """FROM-clause expression for the detections table: the whole folder (glob), or only `files`.
+
+    An explicit file list opens no folders: on the Cloud Run bucket mount the glob walks all 88 folders on every
+    query (step 10c). The hive columns still come from each file's path.
+    """
+    src = ("[" + ", ".join(f"'{sql_path(f)}'" for f in files) + "]" if files
+           else f"'{sql_path(hotspots_dir())}/**/*.parquet'")
+    return (f"read_parquet({src}, hive_partitioning=true, "
+            "hive_types={'sensor': VARCHAR, 'satellite': VARCHAR, 'year': SMALLINT})")
 
 
 def agg_path(grid_deg: float | None = None) -> Path:

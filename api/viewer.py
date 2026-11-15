@@ -51,7 +51,8 @@ def _points_src(d0: dt.date, d1: dt.date, bbox=None) -> str:
         x0, y0, x1, y1 = bbox
         where.append(f"h.lat BETWEEN {y0} AND {y1}")
         hwhere.append(f"z.cell_lat BETWEEN {y0 - config.SETTINGS.grid_deg} AND {y1}")
-    return f"({publish.points_sql(' AND '.join(where), ' AND '.join(hwhere))})"
+    # Only the detections files of these dates (no folder walk on the bucket mount, step 10c).
+    return f"({publish.points_sql(' AND '.join(where), ' AND '.join(hwhere), publish.hotspot_files(d0, d1))})"
 
 
 def _window(date: str, window: str) -> tuple[dt.date, dt.date]:
