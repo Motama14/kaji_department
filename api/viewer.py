@@ -185,6 +185,11 @@ def _hotspots(date, window, bbox, sensors, mode, types, conf, daynight, frp_min,
     w, params = _filters(sensors, mode, types, conf, daynight, bbox, frp_min, frp_max, hour_min, hour_max, ti)
     pts = f"(SELECT * FROM {_points_src(d0, d1, bbox)} WHERE {' AND '.join(w)})"
     con = q.con()
+    with q.time_limit(con, "The hotspots query"):
+        return _hotspots_run(con, pts, params, date, window, d0, d1, mode, zoom)
+
+
+def _hotspots_run(con, pts, params, date, window, d0, d1, mode, zoom):
     n, wsum, ninf = con.execute("SELECT count(*), coalesce(sum(weight), 0), count(*) FILTER (WHERE type_inferred) "
                                 f"FROM {pts}", params).fetchone()
     base = {"date": date, "window": window, "from": d0.isoformat(), "to": d1.isoformat(), "mode": mode,
@@ -239,21 +244,57 @@ def _histogram(d0, d1, gran, bbox, sensors, mode, types, conf, daynight, frp_min
         raise HTTPException(422, "from/to must be YYYY-MM-DD")
     bucket = "date" if gran == "day" else "date_trunc('month', date)"
     con = q.con()
-    # Fast path: precomputed daily counts (no bbox / FRP / hour filters).
-    live = bbox is not None or frp_min is not None or frp_max is not None or (hour_min or 0) > 0 \
+    detail = frp_min is not None or frp_max is not None or (hour_min or 0) > 0 \
         or (hour_max is not None and hour_max < 23)
     w, params = _filters(sensors, mode, types, conf, daynight, bbox, frp_min, frp_max, hour_min, hour_max, ti)
-    if live:
+    note = None
+    if bbox is not None and gran == "month" and not detail:
+        # Area timeline by month (step 10e, user decision): precomputed 0.25 deg cell x month counts in the image
+        # instead of scanning years of detections on the bucket (that hit Cloud Run's 300 s limit).
+        source, note = "area_cells", AREA_MONTH_NOTE
+        aw, aparams = _filters(sensors, mode, types, conf, daynight, None, None, None, None, None, ti)
+        rows = _area_months(con, a, b, bbox, aw, aparams, mode)
+    elif bbox is not None or detail:
+        # Live count from the detections: limited span (a longer one could not finish on Cloud Run).
+        if (b - a).days > LIVE_MAX_DAYS:
+            raise HTTPException(422, f"With FRP or hour filters the timeline covers at most {LIVE_MAX_DAYS} days: "
+                                     "zoom the timeline in.")
+        source = "detections"
         val = "sum(CASE WHEN weight > 0 THEN weight ELSE 1 END)" if mode == "harmonized" else "count(*)"
         sql = (f"SELECT {bucket} AS t, count(*) AS n, {val} AS v FROM {_points_src(a, b, bbox)} "
                f"WHERE {' AND '.join(w)} GROUP BY 1 ORDER BY 1")
-        rows = con.execute(sql, params).fetchall()
-    else:
+        with q.time_limit(con, "The timeline query"):
+            rows = con.execute(sql, params).fetchall()
+    else:  # fast path: precomputed daily counts (no bbox / FRP / hour filters)
+        source = "daily_counts"
         val = "sum(w)" if mode == "harmonized" else "sum(n)"
         sql = (f"SELECT {bucket} AS t, sum(n) AS n, {val} AS v FROM {_daily_src()} "
                f"WHERE date BETWEEN ? AND ? AND {' AND '.join(w)} GROUP BY 1 ORDER BY 1")
         rows = con.execute(sql, [a, b] + params).fetchall()
-    return {"granularity": gran, "mode": mode,
-            "unit": "VIIRS-equivalent detections" if mode == "harmonized" else "detections",
-            "t": [r[0].strftime("%Y-%m-%d") for r in rows], "n": [int(r[1]) for r in rows],
-            "v": [round(float(r[2]), 1) for r in rows]}
+    out = {"granularity": gran, "mode": mode, "source": source,
+           "unit": "VIIRS-equivalent detections" if mode == "harmonized" else "detections",
+           "t": [r[0].strftime("%Y-%m-%d") for r in rows], "n": [int(r[1]) for r in rows],
+           "v": [round(float(r[2]), 1) for r in rows]}
+    return {**out, "note": note} if note else out
+
+
+LIVE_MAX_DAYS = 450  # = the timeline's day / month switch: live month requests over an area are not served
+AREA_MONTH_NOTE = ("Monthly area timeline from precomputed 0.25° cell counts: it covers the cells whose centre lies "
+                   "in the area, so the edges follow the 0.25° grid. All filters apply except FRP and hours.")
+
+
+def _area_months(con, a: dt.date, b: dt.date, bbox, w: list[str], params: list, mode) -> list[tuple]:
+    """(month, n, v) from area_month_g<grid>.parquet over the cells whose centre lies in `bbox` (antimeridian-aware).
+    `w` / `params`: the _filters() clauses without area, FRP or hours (same columns as the daily counts table)."""
+    p = publish.area_path()
+    if not p.exists():
+        raise HTTPException(503, f"{p.name} is missing: run `python -m pipeline.publish area`")
+    h = config.SETTINGS.grid_deg / 2
+    x0, y0, x1, y1 = bbox
+    lon = (f"cell_lon + {h} BETWEEN {x0} AND {x1}" if x0 <= x1
+           else f"(cell_lon + {h} >= {x0} OR cell_lon + {h} <= {x1})")
+    val = "sum(w)" if mode == "harmonized" else "sum(n)"
+    return con.execute(f"""
+        SELECT month_start AS t, sum(n) AS n, {val} AS v FROM '{config.sql_path(p)}'
+        WHERE month_start BETWEEN ? AND ? AND cell_lat + {h} BETWEEN {y0} AND {y1} AND {lon} AND {' AND '.join(w)}
+        GROUP BY 1 ORDER BY 1""", [a.replace(day=1), b] + params).fetchall()

@@ -5,7 +5,7 @@ Run:  .venv/Scripts/python -m uvicorn api.main:app --port 8000
 Docs: http://localhost:8000/docs
 
 Environment (all optional): CORS_ORIGINS (comma-separated, default http://localhost:4200), CSV_MAX_ROWS
-(default 1,000,000), plus the pipeline variables of pipeline/config.py (FIRE_PROCESSED_DIR for the small tables,
+(default 1,000,000), QUERY_TIMEOUT_S (detections queries are stopped after it, default 120; answer 503), plus the pipeline variables of pipeline/config.py (FIRE_PROCESSED_DIR for the small tables,
 FIRE_HOTSPOTS_DIR for the detections, FIRE_TMP_DIR, DUCKDB_*). Startup reads serving_facts.json instead of scanning
 the detections (pipeline.publish; `"facts": "live"` in /api/health means the file is missing or stale).
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from pipeline import config, publish
@@ -32,6 +32,12 @@ app.add_middleware(CORSMiddleware,
                    allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.include_router(viewer.router)
+
+
+@app.exception_handler(q.QueryTimeout)
+def _query_timeout(_request, e: q.QueryTimeout):
+    """A detections query stopped by its time limit (QUERY_TIMEOUT_S, step 10e): 503 with a readable message."""
+    return JSONResponse(status_code=503, content={"detail": str(e)})
 
 
 class Point(BaseModel):

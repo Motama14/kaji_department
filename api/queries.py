@@ -15,8 +15,10 @@ import math
 import os
 import threading
 import warnings
+from contextlib import contextmanager
 from functools import lru_cache
 
+import duckdb
 import numpy as np
 
 from pipeline import config, publish
@@ -33,17 +35,43 @@ class TooManyRows(Exception):
     pass
 
 
+# Step 10e: Cloud Run cuts a request at 300 s but the DuckDB query keeps running inside the instance and slows every
+# other request there. Queries over the detections are interrupted after this many seconds instead (main.py → 503).
+QUERY_TIMEOUT_S = float(os.getenv("QUERY_TIMEOUT_S", "120"))
+
+
+class QueryTimeout(Exception):
+    pass
+
+
+@contextmanager
+def time_limit(cur, what: str = "The query"):
+    """Interrupt `cur`'s queries inside the block after QUERY_TIMEOUT_S seconds (raises QueryTimeout).
+
+    An interrupt that fires after the last query has finished does nothing (DuckDB does not remember it).
+    """
+    timer = threading.Timer(QUERY_TIMEOUT_S, cur.interrupt)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield cur
+    except duckdb.InterruptException:
+        raise QueryTimeout(f"{what} took longer than {QUERY_TIMEOUT_S:g} s and was stopped: "
+                           "narrow the dates or the area.") from None
+    finally:
+        timer.cancel()
+
+
 def con():
     """Shared in-memory DuckDB database; each call returns a cursor (thread-safe usage)."""
     global _con
     with _lock:
         if _con is None:
             c = config.connect()
-            # Cloud Run (step 10b): the detections are read through the bucket mount, which DuckDB sees as local
-            # files and does not cache by default. Keep their Parquet footers and read blocks in memory between
-            # queries (inside memory_limit; evicted first when memory is needed).
+            # Cloud Run (step 10b): keep the Parquet footers of the detections files (read through the bucket
+            # mount) in memory between queries. The block cache (`cache_local_files`) stays off (step 10e): it
+            # splits reads into 16 KB pieces, about twice the read operations, each one a bucket request.
             c.execute("SET parquet_metadata_cache=true")
-            c.execute("SET cache_local_files=true")
             c.execute("INSTALL spatial; LOAD spatial")
             h = config.sql_path(config.harmonized_path())
             c.execute(f"CREATE VIEW harmonized AS SELECT * FROM read_parquet('{h}')")
@@ -337,7 +365,8 @@ def hotspots_csv(geojson: str, start: str | None, end: str | None, only_calendar
     ORDER BY p.datetime_utc
     LIMIT {CSV_MAX_ROWS + 1}
     """
-    df = cur.execute(sql, [geojson]).df()
+    with time_limit(cur, "The CSV query"):
+        df = cur.execute(sql, [geojson]).df()
     if len(df) > CSV_MAX_ROWS:
         raise TooManyRows(f"The query returns more than {CSV_MAX_ROWS:,} detections: narrow the area or the dates.")
     buf = io.StringIO()

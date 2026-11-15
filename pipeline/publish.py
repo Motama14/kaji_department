@@ -32,8 +32,12 @@ Output written here (one pass over the detections, year by year):
                          open only the files for their dates instead of walking the folders (step 10c). After any
                          change to hotspots/, rewrite it (`facts`); `info` compares the list with the folder.
 
+  area_month_g0.25.parquet  the same breakdown per 0.25 deg cell x month (instead of per date): the viewer's monthly
+                         area timeline reads it instead of scanning years of detections (step 10e).
+
 Run from the repo root:
     .venv/Scripts/python -m pipeline.publish build     # daily counts + facts, about 6-10 min
+    .venv/Scripts/python -m pipeline.publish area      # area timeline table, about 10-15 min
     .venv/Scripts/python -m pipeline.publish facts     # facts file only, a few seconds
     .venv/Scripts/python -m pipeline.publish info
 """
@@ -65,6 +69,10 @@ def daily_path():
 
 def facts_path():
     return config.PROCESSED_DIR / "serving_facts.json"
+
+
+def area_path():
+    return config.PROCESSED_DIR / f"area_month_g{S.grid_deg:g}.parquet"
 
 
 FACTS_VERSION = 2  # 2: + hotspot_files (step 10c)
@@ -358,6 +366,66 @@ def check_daily(con) -> None:
         raise SystemExit("daily counts check failed")
 
 
+# ----------------------------------------------------------------------------- area timeline table (step 10e)
+def build_area(con) -> None:
+    """area_month_g<grid>.parquet: the daily counts' breakdown per grid cell and month instead of per date, so the
+    viewer's monthly area timeline needs no scan of the detections (user decision, step 10e)."""
+    import duckdb
+
+    t0 = time.time()
+    prepare(con, live=True)
+    g = S.grid_deg
+    out = area_path()
+    parts = config.TMP_DIR / "area_month_parts"
+    shutil.rmtree(parts, ignore_errors=True)
+    parts.mkdir(parents=True)
+    sel = f"""
+        SELECT CAST(round(floor(lat / {g}) * {g}, 6) AS FLOAT) AS cell_lat,
+               CAST(round(floor(lon / {g}) * {g}, 6) AS FLOAT) AS cell_lon,
+               make_date(year, month, 1) AS month_start, satellite, series_sat, type, confidence_norm, daynight,
+               type_inferred, CAST(count(*) AS INTEGER) AS n,
+               CAST(sum(CASE WHEN weight > 0 THEN weight ELSE 1 END) AS FLOAT) AS w
+        FROM ({{pts}}) GROUP BY ALL"""
+    years = [r[0] for r in con.execute(f"SELECT DISTINCT year FROM {config.hotspots_sql()} ORDER BY 1").fetchall()]
+    for y in years:
+        t1 = time.time()
+        try:  # one pass per year; per month if the year does not fit in memory
+            chunks = [(f"h.year = {y}", f"z.year = {y}", f"{y}")]
+            con.execute(f"COPY ({sel.format(pts=points_sql(*chunks[0][:2]))}) "
+                        f"TO '{config.sql_path(parts / f'{y}.parquet')}' (FORMAT parquet)")
+        except duckdb.OutOfMemoryException:
+            for m in range(1, 13):
+                pts = points_sql(f"h.year = {y} AND h.month = {m}", f"z.year = {y} AND z.month = {m}")
+                con.execute(f"COPY ({sel.format(pts=pts)}) "
+                            f"TO '{config.sql_path(parts / f'{y}_{m:02d}.parquet')}' (FORMAT parquet)")
+        log(f"   {y}: {time.time() - t1:.0f}s")
+    tmp = out.with_name(out.name + ".tmp")
+    # Sorted by cell first, so an area query reads only the row groups of its latitudes.
+    con.execute(f"""COPY (SELECT * FROM read_parquet('{config.sql_path(parts)}/*.parquet')
+                          ORDER BY cell_lat, cell_lon, month_start)
+                    TO '{config.sql_path(tmp)}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 100000)""")
+    tmp.replace(out)
+    shutil.rmtree(parts, ignore_errors=True)
+    n = con.execute(f"SELECT count(*) FROM '{config.sql_path(out)}'").fetchone()[0]
+    log(f"area table: {n:,} rows, {out.stat().st_size / 1e6:.1f} MB -> {out.name} ({time.time() - t0:.0f}s)")
+    check_area(con)
+
+
+def check_area(con) -> None:
+    """Per month, the area table must hold the same counts and harmonized sums as the daily counts table."""
+    a, d = config.sql_path(area_path()), config.sql_path(daily_path())
+    bad = con.execute(f"""
+        WITH x AS (SELECT month_start AS m, sum(n) AS n, sum(w) AS w FROM '{a}' GROUP BY 1),
+             y AS (SELECT date_trunc('month', date) AS m, sum(n) AS n, sum(w) AS w FROM '{d}' GROUP BY 1)
+        SELECT count(*) FILTER (WHERE x.n IS DISTINCT FROM y.n OR abs(x.w - y.w) > 1e-4 * y.w + 1),
+               sum(x.n), sum(y.n)
+        FROM x FULL OUTER JOIN y ON x.m = y.m""").fetchone()
+    log(f"check: area table {bad[1]:,} detections vs daily counts {bad[2]:,}; months that differ: {bad[0]} -> "
+        f"{'OK' if bad[0] == 0 else 'FAILED'}")
+    if bad[0]:
+        raise SystemExit("area table check failed")
+
+
 def info(con) -> None:
     d = config.sql_path(daily_path())
     for r in con.execute(f"""SELECT satellite, min(date), max(date), sum(n), sum(n) FILTER (WHERE in_calendar),
@@ -365,6 +433,12 @@ def info(con) -> None:
         log(f"   {r[0]:<6} {r[1]} -> {r[2]}  {r[3]:>12,} detections, {r[4]:>12,} in calendar, {r[5]:>10,} type inferred")
     f = load_facts()
     log(f"   {facts_path().name}: {'OK, last date ' + f['last_date'] if f else 'missing or stale'}")
+    a = area_path()
+    if a.exists():
+        n = con.execute(f"SELECT count(*) FROM '{config.sql_path(a)}'").fetchone()[0]
+        log(f"   {a.name}: {n:,} rows, {a.stat().st_size / 1e6:.1f} MB")
+    else:
+        log(f"   {a.name}: missing (run `python -m pipeline.publish area`)")
     root = config.hotspots_dir()
     if f and root.exists():
         listed = {r[0] for r in f["hotspot_files"]}
@@ -378,6 +452,7 @@ def main(argv=None) -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("build", help="daily counts table + serving facts (about 6-10 min)")
     sub.add_parser("facts", help="serving facts file only (a few seconds; needs the daily counts table)")
+    sub.add_parser("area", help="area timeline table, cell x month (about 10-15 min; needs the daily counts table)")
     sub.add_parser("info", help="summary of the daily counts table and the facts file")
     args = ap.parse_args(argv)
     con = config.connect()
@@ -385,6 +460,8 @@ def main(argv=None) -> None:
         build_daily(con)
     elif args.cmd == "facts":
         write_facts(con)
+    elif args.cmd == "area":
+        build_area(con)
     else:
         info(con)
 

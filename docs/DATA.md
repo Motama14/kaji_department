@@ -483,3 +483,13 @@ Matches `docs/ANALYSIS.md`. Yearly totals per satellite: `python -m pipeline.agg
   hundred metres (Brazil, 2024-09-10: 61 `type = 3` offshore detections inside the border).
 - Country calendars (harmonized, whole record): Brazil 37.8 M, Russia 30.0 M, USA 10.4 M, Canada 8.4 M VIIRS-eq.
   detections; Canada 2023 = 1.64 M (record season).
+
+## 2026-11-15 — Area timeline table (step 10e)
+- `data/processed/area_month_g0.25.parquet`, built by `python -m pipeline.publish area` in 760 s (one pass per year;
+  2023–2026, with three VIIRS satellites, take 90–126 s each). **55,192,199 rows, 193.0 MB** (zstd, row groups of
+  100,000, sorted by cell then month so an area query reads only its latitudes).
+- Columns: `cell_lat`, `cell_lon` (FLOAT, south-west corner of the 0.25° cell, same rule as the harmonized table),
+  `month_start` (DATE), `satellite`, `series_sat`, `type` (effective), `confidence_norm`, `daynight`, `type_inferred`,
+  `n` (INTEGER detections), `w` (FLOAT, harmonized sum; points outside the calendar count 1 — same definition as
+  `daily_counts.parquet`).
+- Check: per month, `n` and `w` equal the daily counts table (660,730,589 detections, 0 months differ).

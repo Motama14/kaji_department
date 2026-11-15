@@ -1,6 +1,6 @@
 # SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author.
 # Files NOT uploaded by `gcloud run deploy --source .` (gitignore syntax). The upload = code + the small serving
-# tables of data/processed/ (about 270 MB). Check with: gcloud meta list-files-for-upload
+# tables of data/processed/ (size in docs/RUNBOOK.md step 10). Check with: gcloud meta list-files-for-upload
 .gcloudignore
 .git
 .gitignore
@@ -31,3 +31,4 @@ cloud-run.env.yaml
 !/data/processed/static_mask_d0.01.parquet
 !/data/processed/coverage_sat_month.parquet
 !/data/processed/serving_facts.json
+!/data/processed/area_month_g0.25.parquet

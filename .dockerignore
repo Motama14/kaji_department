@@ -9,5 +9,6 @@
 !data/processed/static_mask_d0.01.parquet
 !data/processed/coverage_sat_month.parquet
 !data/processed/serving_facts.json
+!data/processed/area_month_g0.25.parquet
 **/__pycache__
 **/*.pyc
