@@ -23,9 +23,15 @@ Output written here (one pass over the detections, year by year):
   daily_counts.parquet   per date x satellite x effective type x confidence x day/night x calendar flag x
                          series flag x inferred flag: count `n` and harmonized sum `w` (points outside the
                          calendar count 1). Feeds the viewer's timeline histogram and /api/available-dates.
+  serving_facts.json     what the API would otherwise compute at startup by scanning the detections and the
+                         harmonized table (latest detection date, series satellite per month, first NRT date,
+                         months with inferred types), plus a fingerprint (bytes + row count) of the files they
+                         come from. The API reads it at startup; if it is missing or its fingerprint does not match,
+                         the API logs a warning and computes the facts live (Cloud Run cold start, step 10).
 
 Run from the repo root:
-    .venv/Scripts/python -m pipeline.publish build     # about 10 min
+    .venv/Scripts/python -m pipeline.publish build     # daily counts + facts, about 6-10 min
+    .venv/Scripts/python -m pipeline.publish facts     # facts file only, a few seconds
     .venv/Scripts/python -m pipeline.publish info
 """
 from __future__ import annotations
@@ -33,6 +39,8 @@ from __future__ import annotations
 import argparse
 import calendar
 import datetime as dt
+import json
+import logging
 import shutil
 import time
 
@@ -51,13 +59,21 @@ def daily_path():
     return config.PROCESSED_DIR / "daily_counts.parquet"
 
 
+def facts_path():
+    return config.PROCESSED_DIR / "serving_facts.json"
+
+
+FACTS_VERSION = 1
+_log = logging.getLogger("pipeline.publish")
+
+
 def log(msg: str) -> None:
     print(msg, flush=True)
 
 
 # ----------------------------------------------------------------------------- series month table
-def build_series_month(con) -> list[tuple]:
-    """Temp table series_month(year, month, source, series_sat, days_fraction, ym) from the harmonized table.
+def series_rows(con, last: dt.date) -> list[tuple]:
+    """(year, month, source, series_sat, days_fraction, ym) per month, computed from the harmonized table.
 
     One source per month (the S-NPP outage logic is global per month). VIIRS_EXPOSURE months take the VIIRS
     satellite with the most observed days. days_fraction < 1 only for the last data month, whose harmonized
@@ -69,7 +85,6 @@ def build_series_month(con) -> list[tuple]:
     best_viirs = dict(((y, m), s) for y, m, s in con.execute(f"""
         SELECT year, month, arg_max(satellite, obs_days) FROM '{cov}' WHERE satellite IN ('N', 'N20', 'N21')
         GROUP BY ALL""").fetchall())
-    last = last_date(con)
     out = []
     for y, m, sources in rows:
         if len(sources) != 1:
@@ -78,6 +93,16 @@ def build_series_month(con) -> list[tuple]:
         sat = SOURCE_SAT.get(src) or best_viirs[(y, m)]
         frac = last.day / calendar.monthrange(y, m)[1] if (y, m) == (last.year, last.month) else 1.0
         out.append((int(y), int(m), src, sat, round(frac, 4), int(y) * 100 + int(m)))
+    return out
+
+
+def build_series_month(con, facts: dict | None = None) -> list[tuple]:
+    """Temp table series_month(year, month, source, series_sat, days_fraction, ym), from the facts file when
+    given, otherwise computed live (which scans the detections for the latest date)."""
+    if facts:
+        out = [tuple(r) for r in facts["series_month"]]
+    else:
+        out = series_rows(con, last_date(con))
     con.execute("""CREATE OR REPLACE TEMP TABLE series_month (year SMALLINT, month TINYINT, source VARCHAR,
                    series_sat VARCHAR, days_fraction DOUBLE, ym INTEGER)""")
     con.executemany("INSERT INTO series_month VALUES (?, ?, ?, ?, ?, ?)", out)
@@ -112,10 +137,83 @@ def last_date(con) -> dt.date:
     return con.execute(f"SELECT max(date) FROM {hot} WHERE year = (SELECT max(year) FROM {hot})").fetchone()[0]
 
 
-def prepare(con) -> None:
-    """Temp tables used by points_sql(): static_mask and series_month."""
+# ----------------------------------------------------------------------------- serving facts (cold start)
+FACTS: dict | None = None  # facts used by the last prepare(): from the file, or None when computed live
+
+
+def _fingerprint() -> dict:
+    """Bytes and row count of the files the facts are derived from. Modification times are not used: they do
+    not survive the source upload and the image build, sizes and row counts do."""
+    import pyarrow.parquet as pq
+
+    out = {}
+    for p in (config.harmonized_path(), config.coverage_path(), daily_path()):
+        out[p.name] = {"bytes": p.stat().st_size, "rows": pq.read_metadata(p).num_rows} if p.exists() else None
+    return out
+
+
+def compute_facts(con) -> dict:
+    """The startup facts, computed live (scans the detections and the harmonized table; needs the daily table)."""
+    last = last_date(con)
+    rows = series_rows(con, last)
+    d = config.sql_path(daily_path())
+    nrt_first = con.execute(f"SELECT min(date) FILTER (WHERE type_inferred) FROM '{d}'").fetchone()[0]
+    h = config.sql_path(config.harmonized_path())
+    inferred = [f"{y}-{m:02d}" for y, m in con.execute(
+        f"SELECT DISTINCT year, month FROM '{h}' WHERE type_inferred ORDER BY 1, 2").fetchall()]
+    return {"last_date": last.isoformat(), "nrt_first": nrt_first.isoformat() if nrt_first else None,
+            "type_inferred_months": inferred, "series_month": [list(r) for r in rows]}
+
+
+def write_facts(con) -> dict:
+    facts = {"version": FACTS_VERSION, "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "grid_deg": S.grid_deg, "inputs": _fingerprint(), **compute_facts(con)}
+    out = facts_path()
+    tmp = out.with_name(out.name + ".tmp")
+    head = json.dumps({k: v for k, v in facts.items() if k != "series_month"}, indent=1)
+    rows = ",\n".join("  " + json.dumps(r) for r in facts["series_month"])  # one month per line
+    tmp.write_text(head[:-2] + ',\n "series_month": [\n' + rows + "\n ]\n}\n", encoding="utf-8")
+    tmp.replace(out)
+    log(f"serving facts: last date {facts['last_date']}, NRT from {facts['nrt_first']}, "
+        f"{len(facts['series_month'])} months, {len(facts['type_inferred_months'])} with inferred types "
+        f"-> {out.name} ({out.stat().st_size / 1e3:.1f} kB)")
+    return facts
+
+
+def load_facts(warn: bool = True) -> dict | None:
+    """The facts file if it is present and matches its inputs; None (and a warning) otherwise."""
+    p = facts_path()
+    reason = None
+    try:
+        facts = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+        if facts is None:
+            reason = "missing"
+        elif facts.get("version") != FACTS_VERSION or facts.get("grid_deg") != S.grid_deg:
+            reason = "built by another version or grid"
+        elif facts.get("inputs") != _fingerprint():
+            reason = "older than its inputs (harmonized, coverage or daily counts changed)"
+    except (OSError, ValueError) as e:
+        facts, reason = None, f"unreadable ({e})"
+    if reason:
+        if warn:
+            _log.warning("%s is %s: computing the startup facts live (scans the detections); "
+                         "run `python -m pipeline.publish facts`", p.name, reason)
+        return None
+    return facts
+
+
+def facts_status() -> str:
+    """'file' when the API can start from the facts file, 'live' otherwise (for /api/health)."""
+    return "file" if load_facts(warn=False) else "live"
+
+
+def prepare(con, live: bool = False) -> None:
+    """Temp tables used by points_sql(): static_mask and series_month. Uses the facts file unless `live`
+    (the builds always recompute) or the file is missing / stale."""
+    global FACTS
     load_mask(con)
-    build_series_month(con)
+    FACTS = None if live else load_facts()
+    build_series_month(con, FACTS)
 
 
 # ----------------------------------------------------------------------------- enriched points
@@ -168,7 +266,7 @@ def points_sql(where: str = "TRUE", harmonized_where: str = "TRUE") -> str:
 # ----------------------------------------------------------------------------- daily counts
 def build_daily(con) -> None:
     t0 = time.time()
-    prepare(con)
+    prepare(con, live=True)
     out = daily_path()
     parts = config.TMP_DIR / "daily_counts_parts"
     shutil.rmtree(parts, ignore_errors=True)
@@ -192,6 +290,7 @@ def build_daily(con) -> None:
     n = con.execute(f"SELECT count(*) FROM '{config.sql_path(out)}'").fetchone()[0]
     log(f"daily counts: {n:,} rows, {out.stat().st_size / 1e6:.1f} MB -> {out.name} ({time.time() - t0:.0f}s)")
     check_daily(con)
+    write_facts(con)
 
 
 def check_daily(con) -> None:
@@ -221,17 +320,22 @@ def info(con) -> None:
     for r in con.execute(f"""SELECT satellite, min(date), max(date), sum(n), sum(n) FILTER (WHERE in_calendar),
                              sum(n) FILTER (WHERE type_inferred) FROM '{d}' GROUP BY 1 ORDER BY 2""").fetchall():
         log(f"   {r[0]:<6} {r[1]} -> {r[2]}  {r[3]:>12,} detections, {r[4]:>12,} in calendar, {r[5]:>10,} type inferred")
+    f = load_facts()
+    log(f"   {facts_path().name}: {'OK, last date ' + f['last_date'] if f else 'missing or stale'}")
 
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("build", help="daily counts table (about 10 min)")
-    sub.add_parser("info", help="summary of the daily counts table")
+    sub.add_parser("build", help="daily counts table + serving facts (about 6-10 min)")
+    sub.add_parser("facts", help="serving facts file only (a few seconds; needs the daily counts table)")
+    sub.add_parser("info", help="summary of the daily counts table and the facts file")
     args = ap.parse_args(argv)
     con = config.connect()
     if args.cmd == "build":
         build_daily(con)
+    elif args.cmd == "facts":
+        write_facts(con)
     else:
         info(con)
 

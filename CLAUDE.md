@@ -235,7 +235,7 @@ data/
 | 7 | Calibration and validation | Metrics and before/after chart in `docs/RESULTS.md` |
 | 8 | Connect the existing API and web app to the new data (no design changes) | Working end-to-end demo |
 | 9 | Apply the design references once the user provides them | — |
-| 10 | Deploy: API to Google Cloud, web app to GitHub | Public URLs working |
+| 10 | Deploy: API to Google Cloud Run, web app to Firebase Hosting | Public URLs working |
 | 11 | Video, slides (before/after chart), submission | — |
 
 **Time target:** have the working demo (step 8) by mid-hackathon at the latest, leaving room for design and submission.
@@ -259,7 +259,7 @@ data/
 - [x] Steps 6–7: calibration decisions, calibration and validation (`pipeline/calibrate.py`; results in `docs/RESULTS.md`).
 - [x] Step 8: API and web app connected to the new data (`pipeline/publish.py`, `api/`, `web/`, `tests/`; run it with `docs/RUNBOOK.md`).
 - [x] Step 9: design with the user's references (9a layout/palette/download, 9b By Country, 9c summary + type-source filter, collapse-tab restyle; approved by the user 2026-11-15).
-- [x] Step 10: deploy (API → Google Cloud, web → GitHub). Handled by the user (2026-11-15); container files prepared in the repo (`docs/RUNBOOK.md`).
+- [x] Step 10: deploy (API → Cloud Run, web → Firebase Hosting). Handled by the user (2026-11-15); container files and the cold-start fix (small tables in the image, `serving_facts.json`) in the repo (`docs/RUNBOOK.md`, `cloud-run-deploy` skill).
 - [ ] 2026 / NRT data for the "current month".
 - [ ] Submission.
 
@@ -309,7 +309,7 @@ Space Apps allows "Super Intelligence" (SI) tools (LLMs, chatbots, ML…) to acc
 - Always verify the real file columns before assuming the schema in §4.
 - User's machine: Windows laptop with 16 GB of RAM (**do not use all available RAM**). **Do not load the CSVs whole into pandas** (VIIRS files reach ~1.8 GB each); use DuckDB with a memory limit (`SET memory_limit`) and a `temp_directory`, or read in chunks.
 - **Disk space is tight** (≈ 50 GB of raw CSV already on disk). Before the full Parquet conversion, check free space and estimate the output size from a single converted file. Never delete raw CSVs without the user's explicit permission. **All data processing runs locally** on the user's laptop (decided 2026-11-14): work within its limits (DuckDB memory limit, process file by file).
-- **Deployment target (decided 2026-11-14):** the **API on Google Cloud** (likely Cloud Run) and the **web app on GitHub** (static Angular build, e.g. GitHub Pages). Keep this in mind from the start: API base URL configurable via Angular environment files, CORS enabled in FastAPI for the GitHub Pages origin, Angular `base-href` set for the repo path, and the API should ship only the small precomputed aggregates (raw points for the CSV download may need Cloud Storage or a size limit — propose options when we get there). Always propose, never set up cloud resources on your own.
+- **Deployment (2026-11-15):** the **API on Cloud Run** (image = code + small serving tables; the detections stay on the bucket mount at `/data/hotspots`) and the **web app on Firebase Hosting**. Rules and current setup: the `cloud-run-deploy` skill in `.claude/skills/` and `docs/RUNBOOK.md` step 10. API base URL from the Angular environment file; CORS origins in `cloud-run.env.yaml`. Always propose, never set up or change cloud resources on your own: the user runs the commands.
 - `data/` holds the **originals**: do not edit or move them; outputs go to `data/processed/` (or the agreed path).
 - Do not mix Terra with VIIRS in the main calibration (different overpass time).
 - Keep the code parameterized (region/bbox, grid size, calibration/validation years, included satellites) so the configuration can change without rewriting anything.

@@ -1,10 +1,12 @@
-
+# SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author.
+# Files NOT uploaded by `gcloud run deploy --source .` (gitignore syntax). The upload = code + the small serving
+# tables of data/processed/ (about 270 MB). Check with: gcloud meta list-files-for-upload
 .gcloudignore
 .git
 .gitignore
+CLAUDE.md
 .venv/
 .claude/
-data/
 analysis/
 docs/
 tests/
@@ -13,3 +15,19 @@ ui-design/
 **/__pycache__/
 *.pyc
 .env
+.pytest_cache/
+.firebase/
+firebase.json
+.firebaserc
+cloud-run.env.yaml
+
+# data/: only these files of data/processed/ (a file cannot be re-included if its folder is excluded, hence the
+# folder-by-folder pattern). hotspots/ (10.8 GB) stays on the bucket.
+/data/*
+!/data/processed/
+/data/processed/*
+!/data/processed/harmonized_g0.25.parquet
+!/data/processed/daily_counts.parquet
+!/data/processed/static_mask_d0.01.parquet
+!/data/processed/coverage_sat_month.parquet
+!/data/processed/serving_facts.json

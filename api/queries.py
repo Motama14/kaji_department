@@ -56,14 +56,20 @@ def con():
 def meta() -> dict:
     c = con()
     months = c.execute("SELECT year, month, source, series_sat, days_fraction FROM series_month ORDER BY ym").fetchall()
-    daily = publish.daily_path()
-    if daily.exists():
-        d = config.sql_path(daily)
-        last, nrt_first = c.execute(f"SELECT max(date), min(date) FILTER (WHERE type_inferred) FROM '{d}'").fetchone()
-    else:
-        last, nrt_first = publish.last_date(c), None
-    inferred = [f"{y}-{m:02d}" for y, m in c.execute(
-        "SELECT DISTINCT year, month FROM harmonized WHERE type_inferred ORDER BY 1, 2").fetchall()]
+    f = publish.FACTS  # serving_facts.json, loaded by publish.prepare() in con(): no scan at startup
+    if f:
+        last = dt.date.fromisoformat(f["last_date"])
+        nrt_first = dt.date.fromisoformat(f["nrt_first"]) if f["nrt_first"] else None
+        inferred = list(f["type_inferred_months"])
+    else:  # facts file missing or stale: compute live
+        daily = publish.daily_path()
+        if daily.exists():
+            d = config.sql_path(daily)
+            last, nrt_first = c.execute(f"SELECT max(date), min(date) FILTER (WHERE type_inferred) FROM '{d}'").fetchone()
+        else:
+            last, nrt_first = publish.last_date(c), None
+        inferred = [f"{y}-{m:02d}" for y, m in c.execute(
+            "SELECT DISTINCT year, month FROM harmonized WHERE type_inferred ORDER BY 1, 2").fetchall()]
     partial = [r for r in months if r[4] < 1]
     p = None
     if partial:

@@ -5,7 +5,9 @@ Run:  .venv/Scripts/python -m uvicorn api.main:app --port 8000
 Docs: http://localhost:8000/docs
 
 Environment (all optional): CORS_ORIGINS (comma-separated, default http://localhost:4200), CSV_MAX_ROWS
-(default 1,000,000), plus the pipeline variables of pipeline/config.py (FIRE_PROCESSED_DIR, DUCKDB_*).
+(default 1,000,000), plus the pipeline variables of pipeline/config.py (FIRE_PROCESSED_DIR for the small tables,
+FIRE_HOTSPOTS_DIR for the detections, FIRE_TMP_DIR, DUCKDB_*). Startup reads serving_facts.json instead of scanning
+the detections (pipeline.publish; `"facts": "live"` in /api/health means the file is missing or stale).
 """
 from __future__ import annotations
 
@@ -73,7 +75,7 @@ class CsvRequest(Area):
 @app.get("/api/health")
 def health():
     return {"status": "ok", "harmonized": config.harmonized_path().exists(),
-            "daily_counts": publish.daily_path().exists()}
+            "daily_counts": publish.daily_path().exists(), "facts": publish.facts_status()}
 
 
 @app.get("/api/meta")

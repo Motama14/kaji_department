@@ -16,6 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.getenv("FIRE_DATA_DIR", ROOT / "data"))
 PROCESSED_DIR = Path(os.getenv("FIRE_PROCESSED_DIR", DATA_DIR / "processed"))
+# The 10.8 GB detections table can live apart from the small serving tables: on Cloud Run the small tables are in
+# the image (FIRE_PROCESSED_DIR) and the detections stay on the bucket mount (FIRE_HOTSPOTS_DIR=/data/hotspots).
+HOTSPOTS_DIR = Path(os.getenv("FIRE_HOTSPOTS_DIR", PROCESSED_DIR / "hotspots"))
 FIGURES_DIR = ROOT / "docs" / "figures"
 # DuckDB spill folder; FIRE_TMP_DIR moves it off the data folder (read-only bucket on Cloud Run).
 TMP_DIR = Path(os.getenv("FIRE_TMP_DIR", PROCESSED_DIR / "_duckdb_tmp"))
@@ -141,8 +144,8 @@ def sql_path(p: Path | str) -> str:
 
 
 def hotspots_dir() -> Path:
-    """Root of the single detections table (hive-partitioned Parquet)."""
-    return PROCESSED_DIR / "hotspots"
+    """Root of the single detections table (hive-partitioned Parquet); FIRE_HOTSPOTS_DIR overrides it."""
+    return HOTSPOTS_DIR
 
 
 def hotspots_sql() -> str:

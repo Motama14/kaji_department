@@ -1,6 +1,13 @@
+# SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author.
+# Build context of the API image: code + the small serving tables only (see Dockerfile).
 *
 !api/
 !pipeline/
 !requirements-api.txt
+!data/processed/harmonized_g0.25.parquet
+!data/processed/daily_counts.parquet
+!data/processed/static_mask_d0.01.parquet
+!data/processed/coverage_sat_month.parquet
+!data/processed/serving_facts.json
 **/__pycache__
 **/*.pyc
