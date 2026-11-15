@@ -332,7 +332,7 @@ def hotspots_csv(geojson: str, start: str | None, end: str | None, only_calendar
            p.type, p.type_firms,
            CASE WHEN p.type_inferred THEN 'inferred' ELSE 'FIRMS' END AS type_source,
            p.in_calendar, round(p.weight, 4) AS viirs_equivalent_weight, p.harmonized_source
-    FROM ({publish.points_sql(' AND '.join(where), ' AND '.join(hwhere))}) p
+    FROM ({publish.points_sql(' AND '.join(where), ' AND '.join(hwhere), publish.hotspot_files(d0, d1))}) p
     WHERE ST_Contains(ST_GeomFromGeoJSON($1), ST_Point(p.lon, p.lat)) {'AND p.in_calendar' if only_calendar else ''}
     ORDER BY p.datetime_utc
     LIMIT {CSV_MAX_ROWS + 1}

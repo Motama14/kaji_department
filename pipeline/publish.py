@@ -28,6 +28,9 @@ Output written here (one pass over the detections, year by year):
                          months with inferred types), plus a fingerprint (bytes + row count) of the files they
                          come from. The API reads it at startup; if it is missing or its fingerprint does not match,
                          the API logs a warning and computes the facts live (Cloud Run cold start, step 10).
+                         It also lists every detections file with its first / last date and rows, so queries
+                         open only the files for their dates instead of walking the folders (step 10c). After any
+                         change to hotspots/, rewrite it (`facts`); `info` compares the list with the folder.
 
 Run from the repo root:
     .venv/Scripts/python -m pipeline.publish build     # daily counts + facts, about 6-10 min
@@ -43,6 +46,7 @@ import json
 import logging
 import shutil
 import time
+from pathlib import Path
 
 from . import config
 from .aggregate import keep_sql, load_mask, mask_key
@@ -63,7 +67,7 @@ def facts_path():
     return config.PROCESSED_DIR / "serving_facts.json"
 
 
-FACTS_VERSION = 1
+FACTS_VERSION = 2  # 2: + hotspot_files (step 10c)
 _log = logging.getLogger("pipeline.publish")
 
 
@@ -162,7 +166,19 @@ def compute_facts(con) -> dict:
     inferred = [f"{y}-{m:02d}" for y, m in con.execute(
         f"SELECT DISTINCT year, month FROM '{h}' WHERE type_inferred ORDER BY 1, 2").fetchall()]
     return {"last_date": last.isoformat(), "nrt_first": nrt_first.isoformat() if nrt_first else None,
-            "type_inferred_months": inferred, "series_month": [list(r) for r in rows]}
+            "type_inferred_months": inferred, "series_month": [list(r) for r in rows],
+            "hotspot_files": hotspot_manifest(con)}
+
+
+def hotspot_manifest(con) -> list[list]:
+    """[path relative to the detections folder, first date, last date, rows] of every detections file, read from
+    the Parquet footers (rows are date-sorted, so the `date` statistics are exact)."""
+    root = config.hotspots_dir()
+    rows = con.execute(f"""
+        SELECT file_name, min(stats_min_value), max(stats_max_value), sum(row_group_num_rows)
+        FROM parquet_metadata('{config.sql_path(root)}/**/*.parquet') WHERE path_in_schema = 'date'
+        GROUP BY 1 ORDER BY 1""").fetchall()
+    return [[Path(f).relative_to(root).as_posix(), mn, mx, int(n)] for f, mn, mx, n in rows]
 
 
 def write_facts(con) -> dict:
@@ -170,13 +186,15 @@ def write_facts(con) -> dict:
              "grid_deg": S.grid_deg, "inputs": _fingerprint(), **compute_facts(con)}
     out = facts_path()
     tmp = out.with_name(out.name + ".tmp")
-    head = json.dumps({k: v for k, v in facts.items() if k != "series_month"}, indent=1)
-    rows = ",\n".join("  " + json.dumps(r) for r in facts["series_month"])  # one month per line
-    tmp.write_text(head[:-2] + ',\n "series_month": [\n' + rows + "\n ]\n}\n", encoding="utf-8")
+    lists = ("series_month", "hotspot_files")  # one entry per line
+    text = json.dumps({k: v for k, v in facts.items() if k not in lists}, indent=1)[:-2]
+    for k in lists:
+        text += f',\n "{k}": [\n' + ",\n".join("  " + json.dumps(r) for r in facts[k]) + "\n ]"
+    tmp.write_text(text + "\n}\n", encoding="utf-8")
     tmp.replace(out)
     log(f"serving facts: last date {facts['last_date']}, NRT from {facts['nrt_first']}, "
-        f"{len(facts['series_month'])} months, {len(facts['type_inferred_months'])} with inferred types "
-        f"-> {out.name} ({out.stat().st_size / 1e3:.1f} kB)")
+        f"{len(facts['series_month'])} months, {len(facts['type_inferred_months'])} with inferred types, "
+        f"{len(facts['hotspot_files'])} detection files -> {out.name} ({out.stat().st_size / 1e3:.1f} kB)")
     return facts
 
 
@@ -216,13 +234,38 @@ def prepare(con, live: bool = False) -> None:
     build_series_month(con, FACTS)
 
 
+def hotspot_files(d0: dt.date | None = None, d1: dt.date | None = None) -> list[Path] | None:
+    """Detections files whose dates overlap [d0, d1] (open ends allowed), from the facts file, so a query opens
+    4-8 files for a day instead of walking every folder of the bucket mount (step 10c).
+
+    None means "read the whole folder": no facts file loaded, or a listed file is missing (warning logged). A
+    file added to hotspots/ after the facts were written is not seen: rewrite them (`facts`; `info` checks).
+    """
+    listed = (FACTS or {}).get("hotspot_files")
+    if not listed:
+        return None
+    a, b = (d0.isoformat() if d0 else "0000-00-00"), (d1.isoformat() if d1 else "9999-99-99")
+    root = config.hotspots_dir()
+    rels = [rel for rel, first, last, _ in listed if first <= b and last >= a]
+    if not rels:  # dates outside the data: one small file keeps the schema, the date filter returns no rows
+        rels = [min(listed, key=lambda r: r[3])[0]]
+    files = [root / rel for rel in rels]
+    missing = [p for p in files if not p.exists()]
+    if missing:
+        _log.warning("%d detections file(s) listed in %s are missing (first: %s): reading the whole folder; "
+                     "run `python -m pipeline.publish facts`", len(missing), facts_path().name, missing[0])
+        return None
+    return files
+
+
 # ----------------------------------------------------------------------------- enriched points
-def points_sql(where: str = "TRUE", harmonized_where: str = "TRUE") -> str:
+def points_sql(where: str = "TRUE", harmonized_where: str = "TRUE", files: list[Path] | None = None) -> str:
     """Detections with effective type, calendar flag, series flag and weight (needs prepare()).
 
     `where` filters the detections table (columns of hotspots_sql(), alias h): put the date / year / bbox
     filters here so DuckDB prunes partitions and row groups. `harmonized_where` filters the harmonized table
-    (alias z) to the same months, so the join does not read all 35 M cell-months.
+    (alias z) to the same months, so the join does not read all 35 M cell-months. `files` (from hotspot_files())
+    limits the read to those detections files; the `where` date filter must still be given.
     """
     g = S.grid_deg
     hz = config.sql_path(config.harmonized_path())
@@ -238,7 +281,7 @@ def points_sql(where: str = "TRUE", harmonized_where: str = "TRUE") -> str:
              h.processing = 'NRT' AS type_inferred,
              CASE WHEN h.sensor = 'MODIS' THEN TRY_CAST(h.confidence_raw AS INTEGER) >= {S.modis_min_confidence}
                   ELSE h.confidence_norm IN ({conf}) END AS conf_ok
-      FROM {config.hotspots_sql()} h
+      FROM {config.hotspots_sql(files)} h
       LEFT JOIN static_mask m
         ON h.processing = 'NRT' AND m.gy = {mask_key('h.lat')} AND m.gx = {mask_key('h.lon')}
       WHERE {where}
@@ -322,6 +365,12 @@ def info(con) -> None:
         log(f"   {r[0]:<6} {r[1]} -> {r[2]}  {r[3]:>12,} detections, {r[4]:>12,} in calendar, {r[5]:>10,} type inferred")
     f = load_facts()
     log(f"   {facts_path().name}: {'OK, last date ' + f['last_date'] if f else 'missing or stale'}")
+    root = config.hotspots_dir()
+    if f and root.exists():
+        listed = {r[0] for r in f["hotspot_files"]}
+        found = {p.relative_to(root).as_posix() for p in root.rglob("*.parquet")}
+        log(f"   detections files: {len(listed)} listed, {len(found)} in {root.name}/ -> "
+            f"{'OK' if listed == found else 'MISMATCH: run `python -m pipeline.publish facts`'}")
 
 
 def main(argv=None) -> None:
