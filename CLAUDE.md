@@ -124,6 +124,7 @@ data/
   - **Four whole days are duplicated** between consecutive SP files (2014-01-22 and 2015-01-23, in both MODIS and S-NPP; 144,085 rows). The adapter must deduplicate.
   - **Whole-day outages** exist for every satellite (Terra 57 days, Aqua 26, S-NPP 49, NOAA-20 6, NOAA-21 2). Monthly counts have to account for them.
   - The MODIS `845649` file is small because it only covers 2011-11-21 → 2012-01-19. There is no gap.
+- **Converted in steps 3–4 (2026-11-15):** the single detections table is `data/processed/hotspots/` (hive-partitioned Parquet, `sensor=/satellite=/year=`, 660.7 M rows, 10.8 GB, duplicates already removed). Read it with `pipeline.config.hotspots_sql()`; later steps use it instead of the raw CSVs. Schema and audit in `docs/DATA.md`.
 - The practice data (Spain/Brazil, per country) is still in `D:\nasa_space_apps_prep\data\`, useful for comparing results.
 
 ### FIRMS columns (verified on all 59 files in step 1)
@@ -132,7 +133,7 @@ data/
 - `acq_time` is in **UTC**, always 4 digits (`HHMM`). Read it as text, or the leading zeros are lost.
 - `confidence`: **MODIS is numeric (0–100)**; **VIIRS is categorical** (`l`/`n`/`h` only).
 - `satellite`: `Terra`, `Aqua`, `SNPP`, `N20`, `N21`. Map `SNPP` → `N` in the internal schema. S-NPP rows have `instrument = SNPP`, so take the sensor from the folder or file-name code.
-- `type`: 0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source (refineries, gas flares), 3 = offshore. **It exists in the SP files only: the four NRT files lack it.** There, filter static sources by persistence (pixels that burn almost daily for years) or inherit the classification from SP cells.
+- `type`: 0 = presumed vegetation fire, 1 = active volcano, 2 = other static land source (refineries, gas flares), 3 = offshore. **It exists in the SP files only: the four NRT files lack it.** Decided in step 5: NRT rows inherit the type of their 0.01° cell from the SP history (`static_mask_d0.01.parquet`), and the app must warn that this type was calculated (see §5.2 and §6).
 - `frp` is ≤ 0 in 0.02 % of rows (zeros everywhere, negatives in MODIS SP and VIIRS NRT).
 
 ### Optional auxiliary data
@@ -155,29 +156,37 @@ data/
 ### 5.2 Cleaning
 - Burning calendar: only **`type = 0`**. Volcanoes (`type = 1`) and static sources: separate layer, out of the calendar.
 - Confidence threshold: **MODIS ≥ 30** and **VIIRS nominal or high** (adjustable).
-- Non-vegetation events that FIRMS flags as `type = 0` (e.g. La Palma 2021) are excluded via `EXCLUSIONS` in the config.
+- Non-vegetation events that FIRMS flags as `type = 0` are excluded via `EXCLUSIONS` in the config: La Palma 2021, Tolbachik, Holuhraun, Kīlauea, Nyiragongo, Reykjanes, Mauna Loa 2022 (decided in step 5).
+- **NRT rows (no `type`)**: type inherited from the SP history of their 0.01° cell. Kept rows with an inferred type are counted per cell-month (`n_type_inferred`). **User requirement: the app shows a warning that the type of these detections was calculated, because the data did not originally include it**; the CSV marks them (`type_source`).
+- Calendar latitude limited to 60°S–80°N (false alarms beyond). Rows with `frp` ≤ 0 stay; FRP sums clip negatives to 0.
+- Outage days: counts stay raw; `coverage_sat_month.parquet` describes observed/missing/low days per satellite × month.
 
 ### 5.3 Aggregation
 - Common grid: **0.25° × month** (configurable) with **DuckDB** over Parquet.
 - Metrics per cell and month: number of detections, mean and summed FRP, density, split by satellite and by day/night.
-- **[REVIEW]** At global scale the cell table grows a lot (~1.04 M cells at 0.25°, though most are empty). Discuss with the user whether to keep 0.25° or use another resolution for some views.
+- Grid kept at **0.25°** (user decision, step 5): `cell_month_g0.25.parquet`, 12.7 M cell-months, 190,772 active cells, 316 MB. Other grids via `--grid`.
 
 ### 5.4 Calibration
 - Step 1, main calibration: **Aqua vs. Suomi NPP** over the overlap period. For each cell (or group of similar cells), fit the relationship between the VIIRS count and the MODIS count.
 - **Target series: "VIIRS equivalent"**. Aqua is back-projected to take advantage of VIIRS's higher detail.
-- Step 2, filling 2000–2002 with Terra: fit the **Terra→Aqua** relationship over 2002–2012 (before Terra's drift) to estimate the Aqua series for the early months.
+- Step 2, filling 2000–2002 with Terra: fit the **Terra→Aqua** relationship over **2002-07 → 2019** and validate it on 2020–2021 (decided in step 6; Terra's drift shows in the data from 2022) to estimate the Aqua series for the early months.
 - Final result: a single coherent series of **afternoon and night overpasses in VIIRS equivalent**, from 2000 to today, that can keep being updated once Terra and Aqua stop operating.
 - **Done in preparation (v2, see `docs/DECISIONS.md` and `docs/RESULTS.md` in the prep folder):** **separate day/night** calibration (VIIRS/Aqua ≈ 4.5 by day and 15–20 at night), LightGBM Poisson with 3×3 neighborhood, FRP and climatology, blended 50 % with per-cell ratios (`blend_dn`), one model per region. Automatic selection by WAPE on 1° blocks in validation.
-- **[REVIEW] Pending decisions with global data:**
-  - "One model per region" no longer fits: decide between a global model, one per biome/climate zone, or one per continent.
-  - Role of **NOAA-20 and NOAA-21**: continuity only after S-NPP, VIIRS↔VIIRS inter-calibration, or combining all three (and how to avoid double-counting the same fire).
-  - Training cost with 16 GB of RAM: sample or train in blocks.
+- **Decided with the user in step 6 (details in `docs/DECISIONS.md`):**
+  - **One global model** (no regions); metrics also per latitude band.
+  - **S-NPP is the reference**; NOAA-20 / NOAA-21 only fill months where S-NPP has missing days (and after S-NPP's data ends), scaled to S-NPP with day/night ratios.
+  - The **full dense training panel is held in memory** (float32), no sampling.
+  - **Outage days:** counts become full-month equivalents with the coverage table; the Poisson fit weights months by exposure (equivalent to an offset).
+  - Implemented in `pipeline/calibrate.py` (step 7); the series is `data/processed/harmonized_g0.25.parquet`.
+  - **Step 7 result (user decision):** the series is built with **LightGBM alone (`lgbm_dn`)**: validation 1° block
+    WAPE 0.225, total bias −2.8 % (global day/night ratio: 0.331). `blend_dn` tied on WAPE (0.224) but had more bias.
+    On global data LightGBM needs `max_delta_step = 2` (night model diverged without it). Metrics in `docs/RESULTS.md`.
 - Optional if time allows: group detections into **events** with spatio-temporal DBSCAN.
 
 ### 5.5 Validation
-- **Calibrate on 2012–2019**, **validate on 2020–2021**, **analyze 2022–2025 separately** (effect of Terra and Aqua orbital drift).
+- **Calibrate on 2012–2019**, **validate on 2020–2021**, **analyze 2022+ separately** (effect of Terra and Aqua orbital drift). User requirement (step 6): validation must be the years right before the drift starts; 2020–2021 meets it.
 - Key chart for the presentation: **raw series** (with a step in 2012) vs. **harmonized series** (no step), plus the error in the validation years.
-- With global data: report metrics **per region/biome** too, not just a single global number.
+- With global data: report metrics **per latitude band** too, not just a single global number (user chose no extra region download).
 
 ### 5.6 Future work (mention, do not implement)
 - **Sentinel-3 SLSTR** (ESA, ~10:00 overpass) as a possible replacement for Terra's morning coverage. It is not in FIRMS.
@@ -202,6 +211,7 @@ data/
 1. **Burning calendar:** heatmap of years (rows, 2000 to present) × months (columns), accessible ramp (**viridis/cividis**).
 2. **Anomalies:** current month vs. historical median for that month (and percentiles); anomaly view with a **colorblind-safe diverging ramp**.
 3. **CSV download** of the query's points, with source sensor and harmonized value.
+- **Required (user, step 5):** wherever NRT data appears (calendar months, anomaly, map, CSV), show a warning that the hot-spot type was **calculated** (inferred from the SP history) because the data did not originally include it. Use `n_type_inferred` in the cell table; the CSV gets a `type_source` column.
 4. Optional: NRT data via the FIRMS API for the current month; volcano and static-source layer.
 
 ### Indicative endpoints
@@ -241,10 +251,11 @@ data/
 - [x] Global data downloaded and unzipped: MODIS, VIIRS S-NPP, NOAA-20 and NOAA-21 (≈ 50 GB CSV in `data/`).
 - [x] Repo set up: `CLAUDE.md`, `.gitignore`, `.claude/settings.json` (read access to the prep folder).
 - [x] Step 1: data inventory (`pipeline/inventory.py`, results in `docs/DATA.md`).
-- [ ] Step 2: prep review and porting plan.
-- [ ] Steps 3–4: global adapter and Parquet.
-- [ ] Step 5: cleaning and aggregation.
-- [ ] Steps 6–7: calibration decisions, calibration and validation.
+- [x] Step 2: prep review and porting plan (approved; decisions in `docs/DECISIONS.md`).
+- [x] Step 3: global adapter (`pipeline/config.py`, `pipeline/adapter.py`), tested on 4 files (results in `docs/DATA.md`).
+- [x] Step 4: full conversion to Parquet (`data/processed/hotspots/`: 660.7 M rows, 10.8 GB, audited against the inventory).
+- [x] Step 5: cleaning and aggregation (`pipeline/aggregate.py`; `cell_month_g0.25.parquet`, static mask, coverage table; results in `docs/DATA.md`).
+- [x] Steps 6–7: calibration decisions, calibration and validation (`pipeline/calibrate.py`; results in `docs/RESULTS.md`).
 - [ ] Step 8: API and web app connected to the new data.
 - [ ] Step 9: design with the user's references.
 - [ ] Step 10: deploy (API → Google Cloud, web → GitHub).

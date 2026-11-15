@@ -30,3 +30,5 @@ __pycache__/
 # Local-only docs
 /docs/PROGRESS.md
 /docs/RUNBOOK.md
+/docs/DECISIONS.md
+/docs/SI_USAGE.md

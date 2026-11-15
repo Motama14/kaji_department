@@ -289,5 +289,172 @@ Full lists in `data/processed/inventory/gaps.json`.
 
 ### 10. Pending checks
 
-- Duplicates inside a file (same latitude, longitude, date, time, satellite): check during the Parquet conversion.
+- Duplicates inside a file (same latitude, longitude, date, time, satellite): checked on the step-3 test files
+  (see below); `pipeline.adapter check` repeats it for every partition after the full conversion.
 - How many rows have invalid brightness temperatures (§3.13). Low priority.
+
+## 2026-11-15 — Step 3: adapter test (Parquet detections table)
+
+Test set: `fire_archive_SV-C2_845668.csv` (the single big file), plus three small MODIS files to exercise the
+other code paths (`845661` + `845665` for the duplicated boundary day, `fire_nrt_M-C61_845758.csv` for NRT).
+
+### Output schema (`data/processed/hotspots/`)
+Path: `sensor=<MODIS|VIIRS>/satellite=<Terra|Aqua|N|N20|N21>/year=<YYYY>/<source file stem>.parquet`
+(zstd, 100,000-row groups, sorted by `datetime_utc, lat, lon`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `sensor`, `satellite`, `year` | VARCHAR, VARCHAR, SMALLINT | from the path (hive partitions); sensor from the folder, `SNPP` → `N` |
+| `lat`, `lon` | DOUBLE | as in the CSV (4 decimals MODIS SP, 5 elsewhere) |
+| `datetime_utc`, `date`, `month` | TIMESTAMP, DATE, TINYINT | `acq_date` + `acq_time` (UTC) |
+| `daynight` | VARCHAR | `D` / `N` |
+| `confidence_raw`, `confidence_norm` | VARCHAR | raw (`0`–`100` or `l`/`n`/`h`) and `low`/`nominal`/`high` (MODIS: < 30, 30–79, ≥ 80) |
+| `frp`, `brightness`, `bright_t31`, `scan`, `track` | DOUBLE | unchanged |
+| `type` | TINYINT | NULL in NRT rows |
+| `version`, `processing`, `source_file` | VARCHAR | `processing` = `SP` / `NRT` |
+
+### Figures
+| Source file | Rows in | Written | Dropped | Parquet | Bytes/row | Time |
+|---|---:|---:|---:|---:|---:|---:|
+| `fire_archive_SV-C2_845668.csv` (1.66 GB) | 20,503,636 | 20,503,636 | 0 | 344.8 MB | 16.8 | 22 s |
+| `fire_archive_M-C61_845661.csv` (336 MB) | 4,270,946 | 4,270,946 | 0 | 60.8 MB | 14.2 | 4 s |
+| `fire_archive_M-C61_845665.csv` (355 MB) | 4,513,442 | 4,498,949 | 14,493 | 64.1 MB | 14.2 | 5 s |
+| `fire_nrt_M-C61_845758.csv` (69 MB) | 792,357 | 792,357 | 0 | 15.2 MB | 19.2 | 1 s |
+
+- Parquet is 20 % of the CSV size. `lat` + `lon` are 57 % of it (4.6 bytes/row each), `frp`, `brightness` and
+  `bright_t31` about 10 % each, everything else under 4 %.
+- Type variants measured on S-NPP 2014 (19.1 M rows, baseline 16.82 bytes/row): all FLOAT 14.33 (85 %),
+  DECIMAL(8,5) coordinates + FLOAT 13.96 (83 %), without `bright_t31` 14.91 (89 %), minimal `CLAUDE.md` §5.1
+  schema 11.76 (70 %). FLOAT coordinates do not round back to the 5-decimal value in 289 of 19.1 M rows.
+- Query times on the test table (2 GB cap, 4 threads): one day of S-NPP 0.02 s, bbox × one month 0.05 s,
+  bbox × one year 0.23 s.
+- Projection for all 59 files: about 10.8 GB of Parquet and about 12–15 minutes.
+
+### Checks (`pipeline.adapter check`, all passed)
+- Row accounting matches the inventory for the 4 files; 0 rejected lines, 0 values that fail to parse.
+- 37,631 groups (day × satellite × day/night × confidence class × type) compared with the inventory:
+  37,588 identical in count and FRP sum; the other 43 are the duplicated day 2014-01-22 of `845665`
+  (14,493 rows, all exact copies of rows in `845661`, dropped).
+- Every file is in time order (307 row groups).
+- **Repeated keys inside a file** (same satellite, latitude, longitude and minute, different attributes — never
+  exact copies): S-NPP 2014: 14 pairs, S-NPP 2015: 1, Terra 2013: 1, Aqua: 0. NOAA-20 file `845695` has 8
+  (checked before the test). About 1 in a million rows; kept as they are.
+
+## 2026-11-15 — Step 4: full conversion (the detections table)
+
+`data/processed/hotspots/`: **660,730,589 rows, 10.82 GB, 161 Parquet files** (20.3 % of the 53.26 GB of CSV,
+16.4 bytes/row). Schema and layout as in the step-3 section above. Conversion 30 min, audit 15 min
+(2 GB cap, 4 threads). Throughput fell from 75 MB/s (MODIS) to about 20 MB/s (last VIIRS files).
+
+| Folder | Files | Rows in | Rows written | Dropped (duplicates) | Parquet | Bytes/row | Time |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `MODIS` | 28 | 115,219,018 | 115,192,382 | 26,636 | 1.64 GB | 14.3 | 2.5 min |
+| `SV_C2` | 16 | 298,162,094 | 298,044,645 | 117,449 | 5.01 GB | 16.8 | 12.5 min |
+| `J1V_C2` | 10 | 173,667,918 | 173,667,918 | 0 | 2.92 GB | 16.8 | 10 min |
+| `J2V_C2` | 5 | 73,825,644 | 73,825,644 | 0 | 1.24 GB | 16.9 | 5 min |
+| **Total** | **59** | **660,874,674** | **660,730,589** | **144,085** | **10.82 GB** | **16.4** | **30 min** |
+
+| Satellite | Rows | Parquet | Year partitions |
+|---|---:|---:|---|
+| Terra | 40,991,355 | 0.59 GB | 2000–2026 (27) |
+| Aqua | 74,201,027 | 1.05 GB | 2002–2026 (25) |
+| N (S-NPP) | 298,044,645 | 5.01 GB | 2012–2026 (15) |
+| N20 | 173,667,918 | 2.92 GB | 2018–2026 (9) |
+| N21 | 73,825,644 | 1.24 GB | 2023–2026 (4) |
+
+- SP rows 638,738,327 (2000-11-01 → 2026-08-31), NRT rows 21,992,262 (2026-08-01 → 2026-11-13). 9,483 distinct dates.
+- Rows per year and satellite are the table in §4 minus the duplicated days (2014 and 2015, MODIS and S-NPP).
+
+### Audit (`pipeline.adapter check`, passed)
+- Row accounting equals the inventory for all 59 files; 0 rejected lines, 0 values that fail to parse.
+- 541,250 groups (day × satellite × day/night × confidence class × type) compared with the inventory:
+  541,128 identical in count and FRP sum. The other 122 are the four duplicated days.
+- **Dropped duplicates: 144,085 rows**, the four whole days found in step 1, every one an exact copy:
+  MODIS 2014-01-22 (14,493) and 2015-01-23 (12,143); S-NPP 2014-01-22 (61,108) and 2015-01-23 (56,341).
+  No overlapping row was "almost" a copy.
+- All 161 files are in time order (6,671 row groups).
+- Repeated keys left in the table (same satellite, latitude, longitude and minute, different attributes):
+  279 extra rows in total — S-NPP 162, NOAA-20 79, NOAA-21 35, Aqua 2, Terra 1 (about 0.5 per million VIIRS rows).
+  None is an exact copy and none spans two source files.
+
+### Query times on the full table (2 GB cap, 4 threads)
+| Query | Time |
+|---|---:|
+| Rows per year × satellite (whole table) | 0.3 s |
+| One day, all five satellites (351,438 rows on 2024-08-15) | 0.04 s |
+| Bounding box (Iberia) × one month, all satellites | 0.17 s |
+| Bounding box (Iberia) × 2000–2026, all satellites (1.02 M rows) | 7.4 s |
+
+The last one scans the coordinates of all 660 M rows: relevant for the CSV download over long periods (step 8).
+
+## 2026-11-15 — Step 5: cleaning and aggregation
+
+### Measurements that informed the choices (read-only, before building)
+- **NRT `type` inferred from SP history**, validated on the SP rows of 2026 (29.9 M rows, which do have `type`)
+  with a mask built from SP 2000–2025. Net error of the calendar count = (static missed − vegetation wrongly masked) / vegetation:
+
+  | Mask variant | MODIS: static recall / veg. masked / net error | VIIRS: static recall / veg. masked / net error |
+  |---|---|---|
+  | **0.01°, own cell, ≥ 1 SP static detection (chosen)** | **90.1 % / 1.20 % / −0.54 %** | **97.3 % / 1.86 % / −1.64 %** |
+  | 0.01°, 3×3 neighbourhood | 94.4 % / 3.29 % / −2.74 % | 97.8 % / 4.39 % / −4.27 % |
+  | 0.005°, 3×3 | 92.6 % / 1.63 % / −1.09 % | 97.5 % / 2.45 % / −2.26 % |
+  | 0.01°, 3×3, ≥ 3 detections | 90.5 % / 1.89 % / −1.22 % | 97.5 % / 2.49 % / −2.30 % |
+  | 0.01°, 3×3, SP 2023–2025 only | 91.1 % / 1.84 % / −1.17 % | 97.4 % / 2.53 % / −2.34 % |
+
+  Keeping every NRT row instead would add +6.3 % (MODIS) / +10.4 % (VIIRS) and more than double the count in
+  4,504 of 116,135 active 0.25° cells (gas flares).
+- **Grid sizes** (calendar-clean rows): 0.25° 192 k active cells, 12.7 M cell-month rows, Aqua/S-NPP dense panel
+  2012–2021 20.5 M cell-months; 0.5° 57 k / 5.5 M / 6.2 M; 1° 17 k / 2.2 M / 1.9 M. Half of all detections fall
+  in 10,944 cells of 0.25°, 90 % in 50,105.
+- **Lava labelled as vegetation fire (type 0):** a VIIRS-era effect. Kīlauea box: 105,896 VIIRS vs 293 MODIS type-0
+  detections; Reykjanes, Holuhraun and Mauna Loa have none outside their eruptions. Mauna Loa type-0 rows of
+  May–Aug 2022 are at 19.72–19.74°N (Pōhakuloa range fires, real) and are kept. Windows in `pipeline/config.py`.
+
+### Outputs (`data/processed/`)
+| File | Content | Size |
+|---|---|---:|
+| `cell_month_g0.25.parquet` | 12,703,126 cell-months, 190,772 cells of 0.25°, 35 columns, sorted by cell | 315.7 MB |
+| `cell_month_g0.25.funnel.json` | rows removed by each rule, per satellite and SP/NRT | 5 KB |
+| `static_mask_d0.01.parquet` | 734,513 cells of 0.01° with SP static history (type 1: 6,928; 2: 385,551; 3: 342,034) | 5.2 MB |
+| `coverage_sat_month.parquet` | 934 satellite-months: days in record, observed, missing, low days, coverage | 4 KB |
+
+Columns of the cell table: `cell_lat, cell_lon` (SW corner), `year, month`, then per satellite
+(`terra, aqua, snpp, n20, n21`) `n, n_d, n_n, frp_sum, frp_sum_d, frp_sum_n`, and `n_type_inferred`
+(kept rows whose `type` was inferred: 17.9 M rows in 221,481 cell-months, Aug–Nov 2026 only).
+
+### Cleaning funnel (type → confidence → exclusions → latitude)
+| Satellite | Rows | Kept | % kept | Rows with inferred type kept |
+|---|---:|---:|---:|---:|
+| Terra | 40,991,355 | 35,899,843 | 87.6 | 225,769 |
+| Aqua | 74,201,027 | 68,756,104 | 92.7 | 480,432 |
+| S-NPP | 298,044,645 | 243,742,789 | 81.8 | 5,398,840 |
+| NOAA-20 | 173,667,918 | 141,286,281 | 81.4 | 6,044,922 |
+| NOAA-21 | 73,825,644 | 59,863,966 | 81.1 | 5,780,412 |
+| **Total** | **660,730,589** | **549,548,983** | **83.2** | **17,930,375** |
+
+- NRT rows inferred as static: Terra 10.4 %, Aqua 4.3 %, S-NPP 7.8 %, NOAA-20 7.6 %, NOAA-21 7.6 %
+  (true static share in the SP rows of 2026: 11.8 %, 3.7 %, 8.5 %, 8.6 %, 8.7 %).
+- Exclusions removed 261,498 clean type-0 detections: Kīlauea 100,870, Reykjanes 57,785, Holuhraun 55,481,
+  La Palma 28,251, Mauna Loa 15,155, Nyiragongo crater 2,522, Tolbachik 1,299, Nyiragongo 2021 135.
+- Outside 60°S–80°N: 1,556. FRP clipped to 0 in the sums: 4 kept rows (zeros are far more common and need no clip).
+
+### Coverage (outages)
+Missing and low days per satellite equal the step-1 inventory (Terra 57 / 17, Aqua 26 / 39, S-NPP 49 / 27,
+NOAA-20 6 / 4, NOAA-21 2 / 2). Months with ≥ 5 missing days: Aqua 2022-04 (16), Terra 2001-06 (15), Terra 2022-10 (12),
+S-NPP 2022-08 and 2024-07 (10), Terra 2016-02 (9), Terra 2002-03 (8), Aqua 2002-08 (7), Terra 2003-12 (7),
+S-NPP 2026-07 (6), S-NPP 2022-07 (5).
+
+### Raw global S-NPP / Aqua ratio of calendar-clean counts
+Day 4.57–5.23 (2012–2023), 4.35 in 2024 (S-NPP outages); night 27–33 until 2024, then 36–37 in 2025–2026 (Aqua drift).
+Matches `docs/ANALYSIS.md`. Yearly totals per satellite: `python -m pipeline.aggregate info`.
+
+## 2026-11-15 — Step 7: what the calibration learned about the data
+- 7.0 % of S-NPP calendar detections (2012–2019) fall in 0.25° cell-months where Aqua has none; only 0.31 % fall in
+  cells where Aqua saw nothing over the whole period. VIIRS sees small fires next to, not instead of, MODIS fires.
+- Night counts are extremely skewed: mean 1.9 S-NPP night detections per dense cell-month, top 50 cell-months about
+  4,000, maximum 12,895. This broke the default LightGBM Poisson fit (`docs/DECISIONS.md`).
+- S-NPP exposure in the calibration months is at least 30/31 (S-NPP's long outages fall in 2022+).
+- Sensor ratios on complete overlap months: S-NPP/NOAA-20 day 1.021, night 1.000; S-NPP/NOAA-21 day 1.066, night
+  1.018; Aqua/Terra day 2.45, night 0.44 (2002-07 → 2019). Details and metrics in `docs/RESULTS.md`.
+- Harmonized table `harmonized_g0.25.parquet` (built with LightGBM alone): 35.0 M rows, 274 MB; schema and sources
+  in `docs/RESULTS.md`.

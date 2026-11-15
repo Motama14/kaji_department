@@ -28,22 +28,20 @@ from pathlib import Path
 
 import duckdb
 
-REPO = Path(__file__).resolve().parents[1]
-DATA_DIR = Path(os.environ.get("FIRE_DATA_DIR", REPO / "data"))
-PROCESSED_DIR = Path(os.environ.get("FIRE_PROCESSED_DIR", DATA_DIR / "processed"))
+from . import config
+
+# Paths, limits and sources come from the shared configuration (pipeline/config.py).
+REPO = config.ROOT
+DATA_DIR = config.DATA_DIR
+PROCESSED_DIR = config.PROCESSED_DIR
 OUT_DIR = PROCESSED_DIR / "inventory"
 PER_FILE_DIR = OUT_DIR / "per_file"
 TMP_DIR = OUT_DIR / "_duckdb_tmp"
-MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "2GB")
-THREADS = int(os.environ.get("DUCKDB_THREADS", "4"))
+MEMORY_LIMIT = config.DUCKDB_MEMORY_LIMIT
+THREADS = config.DUCKDB_THREADS
 
 # Raw folder -> FIRMS product code (as it appears in the file names) and sensor.
-SOURCES = {
-    "MODIS": {"code": "M-C61", "sensor": "MODIS", "label": "MODIS Terra + Aqua"},
-    "SV_C2": {"code": "SV-C2", "sensor": "VIIRS", "label": "VIIRS S-NPP"},
-    "J1V_C2": {"code": "J1V-C2", "sensor": "VIIRS", "label": "VIIRS NOAA-20"},
-    "J2V_C2": {"code": "J2V-C2", "sensor": "VIIRS", "label": "VIIRS NOAA-21"},
-}
+SOURCES = {k: {"code": s.code, "sensor": s.sensor, "label": s.label} for k, s in config.SOURCES.items()}
 FILE_RE = re.compile(r"^fire_(?P<kind>archive|nrt)_(?P<code>.+)_(?P<id>\d+)\.csv$")
 EXPECTED_COLS = [
     "latitude", "longitude", "brightness", "scan", "track", "acq_date", "acq_time",
