@@ -248,14 +248,15 @@ def _histogram(d0, d1, gran, bbox, sensors, mode, types, conf, daynight, frp_min
         or (hour_max is not None and hour_max < 23)
     w, params = _filters(sensors, mode, types, conf, daynight, bbox, frp_min, frp_max, hour_min, hour_max, ti)
     note = None
-    if bbox is not None and gran == "month" and not detail:
-        # Area timeline by month (step 10e, user decision): precomputed 0.25 deg cell x month counts in the image
-        # instead of scanning years of detections on the bucket (that hit Cloud Run's 300 s limit).
-        source, note = "area_cells", AREA_MONTH_NOTE
+    if bbox is not None and not detail:
+        # Area timeline (step 10e, user decisions): precomputed 0.25 deg cell x month counts in the image instead of
+        # scanning the detections on the bucket (could not finish on Cloud Run). Always monthly bars, also when days
+        # are asked: the response says "month" and the web timeline draws the bars from the response.
+        source, note, gran = "area_cells", AREA_MONTH_NOTE, "month"
         aw, aparams = _filters(sensors, mode, types, conf, daynight, None, None, None, None, None, ti)
         rows = _area_months(con, a, b, bbox, aw, aparams, mode)
-    elif bbox is not None or detail:
-        # Live count from the detections: limited span (a longer one could not finish on Cloud Run).
+    elif detail:
+        # FRP / hour filters: live count from the detections, limited span (a longer one could not finish on Cloud Run).
         if (b - a).days > LIVE_MAX_DAYS:
             raise HTTPException(422, f"With FRP or hour filters the timeline covers at most {LIVE_MAX_DAYS} days: "
                                      "zoom the timeline in.")
@@ -279,8 +280,9 @@ def _histogram(d0, d1, gran, bbox, sensors, mode, types, conf, daynight, frp_min
 
 
 LIVE_MAX_DAYS = 450  # = the timeline's day / month switch: live month requests over an area are not served
-AREA_MONTH_NOTE = ("Monthly area timeline from precomputed 0.25° cell counts: it covers the cells whose centre lies "
-                   "in the area, so the edges follow the 0.25° grid. All filters apply except FRP and hours.")
+AREA_MONTH_NOTE = ("Area timeline by month (also when zoomed in) from precomputed 0.25° cell counts: it covers the cells "
+                   "whose centre lies in the area, so the edges follow the 0.25° grid. All filters apply except FRP "
+                   "and hours.")
 
 
 def _area_months(con, a: dt.date, b: dt.date, bbox, w: list[str], params: list, mode) -> list[tuple]:
