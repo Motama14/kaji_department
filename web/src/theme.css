@@ -1,0 +1,122 @@
+/* SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. */
+/*
+ * Global colour palette of the viewer. Every colour the viewer uses (except the FRP data ramp in
+ * app/viewer/frp.ts, which encodes data and must stay colour-blind safe) comes from these tokens.
+ *
+ * Switch the whole look by changing data-theme on <html> in src/index.html:
+ *   data-theme="sketch"  default, the colours of the design sketches (ui-design/*.png)
+ *   data-theme="dark"    the previous dark satellite-viewer look
+ * To mock up a new design, copy one block, give it a new name and change the values.
+ */
+
+:root,
+[data-theme="sketch"] {
+  --c-font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* top bar, timeline toolbar and date axis */
+  --c-bar: #133356;
+  --c-bar-ink: #e3e9f1;
+  --c-bar-muted: #9fb2c8;
+
+  /* Global | By Country switch */
+  --c-toggle-track: #000000;
+  --c-toggle-ink: #ffffff;
+  --c-toggle-on: #075ba1;
+  --c-toggle-on-ink: #ffffff;
+
+  /* sidebars (filters & information, download data) */
+  --c-panel: #d9d9d9;
+  --c-panel-ink: #111111;
+  --c-panel-muted: #4d4d4d;
+  --c-panel-line: #bdbdbd;
+  --c-panel-input: #f2f2f2;
+  --c-panel-edge: #111111;
+
+  /* collapse tabs (▶) */
+  --c-tab: #d9d9d9;
+  --c-tab-ink: #111111;
+  --c-tab-hover: #e9e9e9;
+  --c-tab-shadow: rgba(0, 0, 0, 0.28);
+
+  /* map and timeline */
+  --c-map-bg: #ffffff;
+  --c-hist-bg: #000000;
+  --c-hist-bar: #075ba1;
+  --c-hist-window: rgba(255, 255, 255, 0.16);
+  --c-hist-nodata: rgba(255, 255, 255, 0.04);
+  --c-marker: #ffffff;
+
+  /* By Country: dimmed rest of the world and the country border */
+  --c-mask: rgba(19, 51, 86, 0.62);
+  --c-country-line: #ffffff;
+
+  /* time picker pill and its popover */
+  --c-pill: #d9d9d9;
+  --c-pill-ink: #111111;
+
+  /* selected buttons, sliders, links */
+  --c-accent: #075ba1;
+  --c-accent-ink: #ffffff;
+  --c-focus: #3b8fe0;
+
+  /* toasts and map popups */
+  --c-overlay: #133356;
+  --c-overlay-ink: #eef2f7;
+  --c-overlay-muted: #a9bad0;
+  --c-overlay-line: #2b4f78;
+
+  --c-notice-bg: rgba(7, 91, 161, 0.1);
+  --c-notice-line: rgba(7, 91, 161, 0.45);
+  --c-err: #b42318;
+}
+
+[data-theme="dark"] {
+  --c-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --c-bar: #12151c;
+  --c-bar-ink: #eceae4;
+  --c-bar-muted: #a3a8b3;
+
+  --c-toggle-track: #1b2029;
+  --c-toggle-ink: #eceae4;
+  --c-toggle-on: #ffb547;
+  --c-toggle-on-ink: #111111;
+
+  --c-panel: #12151c;
+  --c-panel-ink: #eceae4;
+  --c-panel-muted: #a3a8b3;
+  --c-panel-line: #2a303b;
+  --c-panel-input: #1b2029;
+  --c-panel-edge: #2a303b;
+
+  --c-tab: #1b2029;
+  --c-tab-ink: #eceae4;
+  --c-tab-hover: #262d39;
+  --c-tab-shadow: rgba(0, 0, 0, 0.6);
+
+  --c-map-bg: #0b0d12;
+  --c-hist-bg: #0b0d12;
+  --c-hist-bar: #e8833a;
+  --c-hist-window: rgba(255, 196, 61, 0.16);
+  --c-hist-nodata: rgba(255, 255, 255, 0.04);
+  --c-marker: #ffd23f;
+
+  --c-mask: rgba(0, 0, 0, 0.6);
+  --c-country-line: #ffd23f;
+
+  --c-pill: #1b2029;
+  --c-pill-ink: #eceae4;
+
+  --c-accent: #ffb547;
+  --c-accent-ink: #111111;
+  --c-focus: #ffb547;
+
+  --c-overlay: #12151c;
+  --c-overlay-ink: #eceae4;
+  --c-overlay-muted: #a3a8b3;
+  --c-overlay-line: #2a303b;
+
+  --c-notice-bg: rgba(255, 210, 63, 0.1);
+  --c-notice-line: rgba(255, 210, 63, 0.35);
+  --c-err: #f97066;
+}

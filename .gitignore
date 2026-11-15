@@ -32,3 +32,11 @@ __pycache__/
 /docs/RUNBOOK.md
 /docs/DECISIONS.md
 /docs/SI_USAGE.md
+
+# Tests
+/tests
+
+
+# Firebase Hosting local cache
+.firebase/
+firebase-debug.log

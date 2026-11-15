@@ -1,0 +1,69 @@
+/* SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. */
+/* Timeline of the design sketches: toolbar (TIMEFRAME + time picker), black histogram band, date axis. */
+:host { display: block; position: relative; background: var(--c-bar); color: var(--c-bar-ink); user-select: none; }
+
+.toolbar { position: relative; height: 50px; display: flex; align-items: center; gap: 30px; padding: 0 16px 0 21px; }
+.toolbar.reserve { padding-right: 66px; }
+.label { font-size: .88rem; letter-spacing: .01em; }
+
+.picker-wrap { position: relative; }
+.pill {
+  display: inline-flex; align-items: center; gap: 24px; height: 30px; padding: 0 12px 0 20px; border-radius: 999px; border: 0;
+  background: var(--c-pill); color: var(--c-pill-ink); font: inherit; font-size: .88rem; cursor: pointer; white-space: nowrap;
+}
+.caret { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 11px solid currentColor; }
+.pill[aria-expanded="true"] .caret { transform: rotate(180deg); }
+
+/* the timeline sits at the bottom of the screen, so the picker opens upwards */
+.pop {
+  position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 20; width: min(440px, 90vw);
+  background: var(--c-pill); color: var(--c-pill-ink); border-radius: 10px; padding: 6px 14px 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .35); font-size: .8rem;
+}
+.pop section { padding: 8px 0 4px; }
+.pop section + section { border-top: 1px solid rgba(0, 0, 0, .15); }
+.pop h4 { margin: 0 0 6px; font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.pop .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 4px; }
+.pop label { display: inline-flex; gap: 4px; align-items: center; }
+.pop button, .pop select, .pop input {
+  font: inherit; font-size: .78rem; background: rgba(255, 255, 255, .7); color: inherit;
+  border: 1px solid rgba(0, 0, 0, .2); border-radius: 6px; padding: 3px 8px;
+}
+.pop button { cursor: pointer; }
+.pop button.on { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-accent-ink); }
+.pop .typed { width: 92px; }
+
+.marker-label { position: absolute; bottom: 14px; transform: translateX(-50%); font-size: .82rem; white-space: nowrap; pointer-events: none; }
+
+.ctrls { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.ctrls button, .ctrls select {
+  font: inherit; font-size: .78rem; min-width: 28px; height: 26px; padding: 0 6px; cursor: pointer;
+  background: transparent; color: var(--c-bar-ink); border: 1px solid var(--c-bar-muted); border-radius: 6px;
+}
+.ctrls select option { background: var(--c-pill); color: var(--c-pill-ink); }
+.ctrls button.play[aria-pressed="true"] { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-accent-ink); }
+.ctrls .gap { width: 8px; }
+.spin { width: 11px; height: 11px; border: 2px solid var(--c-bar-muted); border-top-color: var(--c-bar-ink); border-radius: 50%; animation: s .7s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+
+button:focus-visible, select:focus-visible, input:focus-visible, .track:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+
+.track { position: relative; height: 152px; cursor: grab; touch-action: none; overflow: hidden; }
+.track:active { cursor: grabbing; }
+svg { display: block; }
+.band { fill: var(--c-hist-bg); }
+.nodata { fill: var(--c-hist-nodata); }
+.win { fill: var(--c-hist-window); }
+.bar { fill: var(--c-hist-bar); }
+.tick { stroke: var(--c-bar-muted); opacity: .6; }
+.tick.major { opacity: 1; stroke: var(--c-bar-ink); }
+.lbl { fill: var(--c-bar-muted); font-size: 12px; }
+.lbl.major { fill: var(--c-bar-ink); font-size: 15px; }
+.sel { stroke: var(--c-marker); stroke-width: 1.5; }
+.area-tag { position: absolute; top: 6px; left: 8px; font-size: .72rem; color: var(--c-bar-muted); pointer-events: auto; cursor: help; }
+
+@media (max-width: 900px) {
+  .toolbar { gap: 10px; padding-left: 10px; }
+  .label, .marker-label, .pl, .ctrls select, .ctrls .gap, .ctrls button[title^="Zoom"], .ctrls button[title^="Previous"], .ctrls button[title^="Next"] { display: none; }
+  .pill { gap: 10px; padding: 0 10px; font-size: .75rem; }
+}

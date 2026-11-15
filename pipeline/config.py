@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.getenv("FIRE_DATA_DIR", ROOT / "data"))
 PROCESSED_DIR = Path(os.getenv("FIRE_PROCESSED_DIR", DATA_DIR / "processed"))
 FIGURES_DIR = ROOT / "docs" / "figures"
-TMP_DIR = PROCESSED_DIR / "_duckdb_tmp"
+# DuckDB spill folder; FIRE_TMP_DIR moves it off the data folder (read-only bucket on Cloud Run).
+TMP_DIR = Path(os.getenv("FIRE_TMP_DIR", PROCESSED_DIR / "_duckdb_tmp"))
 
 DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "2GB")
 DUCKDB_THREADS = int(os.getenv("DUCKDB_THREADS", "4"))

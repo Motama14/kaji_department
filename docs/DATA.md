@@ -458,3 +458,28 @@ Matches `docs/ANALYSIS.md`. Yearly totals per satellite: `python -m pipeline.agg
   1.018; Aqua/Terra day 2.45, night 0.44 (2002-07 → 2019). Details and metrics in `docs/RESULTS.md`.
 - Harmonized table `harmonized_g0.25.parquet` (built with LightGBM alone): 35.0 M rows, 274 MB; schema and sources
   in `docs/RESULTS.md`.
+
+## 2026-11-15 — Step 8: data as the API serves it
+- Last data date 2026-11-13 (S-NPP 2026-11-02): November 2026 is a partial month (13 of 30 days). Its harmonized
+  value covers those 13 days; the anomaly uses a pro-rated baseline (`docs/DECISIONS.md`).
+- Near-real-time rows with a calculated type: VIIRS from 2026-08-01, MODIS from 2026-09-01; 22.0 M rows
+  (Terra 0.27 M, Aqua 0.52 M, S-NPP 6.60 M, NOAA-20 7.45 M, NOAA-21 7.15 M). Calendar months flagged: 2026-08 → 2026-11.
+- Series satellite per month: Terra 2000-11 → 2002-06, Aqua 2002-07 → 2012-01, S-NPP from 2012-02 except NOAA-20 in
+  2022-07/08, 2024-05/06/07/09/11, 2026-03/04/06/07 and 2026-11 (S-NPP missing days).
+- Point weights carry 439.7 M of the 453.4 M harmonized detections (97.0 %); the other 3 % are model values in
+  cell-months where the series satellite has no detection, so the map's "VIIRS-eq." sum is slightly below the calendar.
+- `daily_counts.parquet`: 558,210 rows, 2.6 MB; matches the detections table (660,730,589) and the cell table's
+  calendar count (549,548,983).
+
+## 2026-11-15 — Step 9b: country borders (Natural Earth)
+- Source: Natural Earth 1:50m Admin 0 countries, release v5.1.2 (public domain), pinned URL in `pipeline/countries.py`.
+  242 units → `web/public/countries.geojson` (1.70 MB, 0.57 MB gzipped), coordinates rounded to 0.001°.
+- Id = `ADM0_A3`: `ISO_A3` is `-99` for France, Norway and a few others. Names from `NAME_EN`.
+- Antimeridian: Natural Earth splits rings at ±180°. Five units get a shifted box (east > 180): Fiji, Kiribati,
+  New Zealand, Russia, USA. Antarctica spans every longitude and keeps the plain box. The zoom box is the largest
+  part (France's would otherwise cover the overseas departments).
+- Antarctica has no calendar cells (calendar latitude limit 60°S): its polygon calendar is all zeros.
+- 1:50m coastlines are generalised: a few coastal or offshore detections fall inside or outside the border by a few
+  hundred metres (Brazil, 2024-09-10: 61 `type = 3` offshore detections inside the border).
+- Country calendars (harmonized, whole record): Brazil 37.8 M, Russia 30.0 M, USA 10.4 M, Canada 8.4 M VIIRS-eq.
+  detections; Canada 2023 = 1.64 M (record season).

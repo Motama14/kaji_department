@@ -1,0 +1,39 @@
+:host { display: block; }
+header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.back { color: var(--accent); font-size: .85rem; text-decoration: none; }
+h1 { margin: 0; font-size: 1.2rem; }
+h1 small { font-weight: 400; color: var(--muted); margin-left: 8px; font-size: .85rem; }
+main { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; padding: 16px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.map { height: 340px; border-radius: 8px; border: 1px solid var(--line); }
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 0; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; }
+legend { font-size: .8rem; color: var(--muted); }
+label { font-size: .8rem; display: flex; flex-direction: column; gap: 2px; }
+input[type=number] { width: 80px; }
+.check { flex-direction: row; align-items: center; gap: 4px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.toolbar button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.legend { display: flex; align-items: center; gap: 8px; font-size: .8rem; margin-bottom: 8px; flex-wrap: wrap; }
+.ramp { display: inline-block; width: 180px; height: 10px; border-radius: 3px; }
+.calendar-wrap { overflow-x: auto; }
+.calendar { border-collapse: separate; border-spacing: 2px; font-size: .72rem; }
+.calendar th { font-weight: 500; color: var(--muted); padding: 0 4px; }
+.calendar td { width: 44px; height: 20px; text-align: center; border-radius: 3px; cursor: pointer; }
+.calendar td.viirs { box-shadow: inset 2px 0 0 rgba(255,255,255,.7); }
+.calendar td.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* Step 8: marker for months whose detection type was calculated (NRT data); restyled with the step-9 design. */
+.inferred { font-weight: 700; margin-left: 1px; }
+.type-note .inferred { margin-right: 2px; }
+.calendar td:focus-visible { outline: 2px solid var(--accent); }
+.calendar td.total { width: 120px; text-align: left; position: relative; cursor: default; }
+.calendar .bar { position: absolute; left: 0; top: 4px; bottom: 4px; background: var(--bar); border-radius: 0 3px 3px 0; }
+.calendar .num { position: relative; padding-left: 4px; }
+.calendar tr.median td { color: var(--muted); cursor: default; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; }
+.card .k { font-size: .75rem; color: var(--muted); }
+.card .v { font-size: 1.6rem; font-weight: 600; }
+.muted { color: var(--muted); font-size: .8rem; }
+.error { color: var(--err); }
+.empty { color: var(--muted); padding: 40px 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

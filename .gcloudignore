@@ -1,0 +1,15 @@
+
+.gcloudignore
+.git
+.gitignore
+.venv/
+.claude/
+data/
+analysis/
+docs/
+tests/
+web/
+ui-design/
+**/__pycache__/
+*.pyc
+.env

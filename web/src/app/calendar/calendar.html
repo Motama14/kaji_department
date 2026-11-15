@@ -1,0 +1,116 @@
+<!-- SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. -->
+<header>
+  <h1>Harmonized burn calendar <small>MODIS + VIIRS active fires, 2000 → today</small></h1>
+  <a class="back" href="/">← World hotspot viewer</a>
+</header>
+
+<main>
+  <section class="side">
+    <div #map class="map" aria-label="Map: draw an area of interest"></div>
+
+    <fieldset>
+      <legend>Or enter coordinates</legend>
+      <label>Lat <input type="number" step="0.01" [ngModel]="lat()" (ngModelChange)="lat.set($event)" /></label>
+      <label>Lon <input type="number" step="0.01" [ngModel]="lon()" (ngModelChange)="lon.set($event)" /></label>
+      <label>Radius km <input type="number" min="1" max="500" [ngModel]="radius()" (ngModelChange)="radius.set($event)" /></label>
+      <button type="button" (click)="usePoint()">Use point</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Date range</legend>
+      <label>From <input type="month" [ngModel]="start()" (ngModelChange)="start.set($event)" /></label>
+      <label>To <input type="month" [ngModel]="end()" (ngModelChange)="end.set($event)" /></label>
+      <button type="button" (click)="refresh()" [disabled]="!area()">Update</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Download</legend>
+      <button type="button" (click)="downloadCsv(false)" [disabled]="!area()">All hotspots (CSV)</button>
+      <button type="button" (click)="downloadCsv(true)" [disabled]="!area()">Calendar hotspots only</button>
+    </fieldset>
+    <p class="muted">{{ areaLabel() }}</p>
+    @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+  </section>
+
+  <section class="content">
+    <div class="toolbar" role="radiogroup" aria-label="Calendar view">
+      <button type="button" [class.on]="view() === 'harmonized'" (click)="view.set('harmonized')">Harmonized counts</button>
+      <button type="button" [class.on]="view() === 'anomaly'" (click)="view.set('anomaly')">Anomaly vs median</button>
+      <button type="button" [class.on]="view() === 'raw'" (click)="view.set('raw')">Raw (not harmonized)</button>
+      <label class="check"><input type="checkbox" [ngModel]="showValues()" (ngModelChange)="showValues.set($event)" /> Show values</label>
+      @if (loading()) { <span class="muted">Loading…</span> }
+    </div>
+
+    @if (cal(); as c) {
+      <div class="legend">
+        @if (view() === 'anomaly') {
+          <span>fewer fires</span><span class="ramp" [style.background]="divergingGrad"></span><span>more fires</span>
+          <span class="muted">(% vs median of the same month; gray = typical)</span>
+        } @else {
+          <span>0</span><span class="ramp" [style.background]="viridis"></span><span>{{ maxValue() | number: '1.0-0' }}</span>
+          <span class="muted">detections / month, log scale — {{ c.unit }}</span>
+        }
+      </div>
+
+      <div class="calendar-wrap">
+        <table class="calendar">
+          <caption class="sr-only">Fire detections per month and year</caption>
+          <thead>
+            <tr><th scope="col">Year</th>
+              @for (m of months; track m) { <th scope="col">{{ m }}</th> }
+              <th scope="col">Total</th></tr>
+          </thead>
+          <tbody>
+            @for (y of c.years; track y; let yi = $index) {
+              <tr>
+                <th scope="row">{{ y }}</th>
+                @for (v of matrix()![yi]; track $index; let mi = $index) {
+                  <td [style.background]="cellColor(v)" [style.color]="ink(v)" [title]="cellTitle(yi, mi)"
+                      [class.sel]="selected()?.year === y && selected()?.month === mi + 1"
+                      [class.viirs]="c.source[yi][mi]?.startsWith('VIIRS')"
+                      (click)="v !== null && pick(y, mi + 1)" tabindex="0"
+                      (keydown.enter)="v !== null && pick(y, mi + 1)">
+                    {{ showValues() ? fmt(v) : '' }}@if (c.type_inferred[yi][mi]) {<span class="inferred" aria-label="detection type calculated">*</span>}
+                  </td>
+                }
+                <td class="total"><span class="bar" [style.width.%]="(100 * c.year_totals[yi]) / maxTotal()"></span>
+                  <span class="num">{{ c.year_totals[yi] | number: '1.0-0' }}</span></td>
+              </tr>
+            }
+            <tr class="median">
+              <th scope="row">Median</th>
+              @for (v of c.monthly_median; track $index) { <td>{{ v === null ? '' : (v | number: '1.0-0') }}</td> }
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">Cells with a thin left mark come from VIIRS (S-NPP, or NOAA-20 scaled to S-NPP in months when
+        S-NPP had missing days); the others are MODIS converted to VIIRS-equivalent with the calibration model.
+        Click a month to compare it with history.</p>
+      @if (inferredMonths()) {
+        <p class="muted type-note" role="note"><span class="inferred">*</span> {{ inferredMonths() }}: {{ c.type_inferred_note }}</p>
+      }
+      @if (partialNote()) { <p class="muted" role="note">{{ partialNote() }}</p> }
+
+      @if (anomaly(); as a) {
+        <div class="cards" aria-live="polite">
+          <div class="card"><span class="k">{{ months[a.month - 1] }} {{ a.year }}@if (a.type_inferred) {<span class="inferred">*</span>}</span><span class="v">{{ a.current | number: '1.0-0' }}</span>
+            <span class="muted">detections{{ a.is_complete ? '' : ' up to ' + a.data_through }}</span></div>
+          <div class="card"><span class="k">Historical median{{ a.baseline_prorated ? ' (pro-rated)' : '' }}</span><span class="v">{{ a.median | number: '1.0-0' }}</span><span class="muted">P25–P75: {{ a.p25 | number: '1.0-0' }}–{{ a.p75 | number: '1.0-0' }}</span></div>
+          <div class="card"><span class="k">Anomaly vs median</span>
+            <span class="v">{{ a.anomaly_pct_vs_median === null ? 'n/a' : ((a.anomaly_pct_vs_median > 0 ? '+' : '') + (a.anomaly_pct_vs_median | number: '1.0-0') + '%') }}</span>
+            <span class="muted">z = {{ a.z_score ?? 'n/a' }}</span></div>
+          <div class="card"><span class="k">Percentile rank</span><span class="v">{{ a.percentile_rank | number: '1.0-0' }}</span><span class="muted">vs {{ a.n_baseline_years }} years ({{ a.baseline_years[0] }}–{{ a.baseline_years[1] }})</span></div>
+        </div>
+        @if (a.baseline_prorated) {
+          <p class="muted" role="note">{{ months[a.month - 1] }} {{ a.year }} is not complete (data up to {{ a.data_through }}):
+            the historical values are scaled to the same {{ a.days_fraction * 100 | number: '1.0-0' }} % of the month.</p>
+        }
+        @if (a.type_inferred) { <p class="muted type-note" role="note"><span class="inferred">*</span> {{ a.type_inferred_note }}</p> }
+      }
+    } @else {
+      <p class="empty">Select an area on the map to build its burn calendar.</p>
+    }
+  </section>
+</main>

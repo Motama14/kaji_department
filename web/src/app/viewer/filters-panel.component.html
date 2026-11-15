@@ -1,0 +1,116 @@
+<!-- SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. -->
+@if (showTypeNote()) {
+  <p class="notice" role="note">* From {{ available().nrt_first }} on: {{ available().type_inferred_note }}</p>
+}
+
+<section aria-labelledby="h-mode">
+  <h3 id="h-mode">Data mode</h3>
+  <div class="seg" role="radiogroup" aria-labelledby="h-mode">
+    <button type="button" role="radio" [attr.aria-checked]="f().mode === 'harmonized'" [class.on]="f().mode === 'harmonized'" (click)="setMode('harmonized')">Harmonized</button>
+    <button type="button" role="radio" [attr.aria-checked]="f().mode === 'raw'" [class.on]="f().mode === 'raw'" (click)="setMode('raw')">Raw</button>
+  </div>
+  @if (f().mode === 'harmonized') { <p class="hint">{{ seriesText() }}</p> }
+</section>
+
+<section aria-labelledby="h-src">
+  <h3 id="h-src">Sources</h3>
+  @for (s of sensors(); track s.code) {
+    <label class="chk" [class.disabled]="!s.available || f().mode === 'harmonized'"
+           [title]="s.available ? s.range!.first + ' → ' + s.range!.last : 'No data loaded for this satellite'">
+      <input type="checkbox" [checked]="has('sensors', s.code)" [disabled]="!s.available || f().mode === 'harmonized'"
+             (change)="toggle('sensors', s.code)" />
+      {{ s.label }} @if (!s.available) { <span class="muted">(no data)</span> }
+    </label>
+  }
+  @if (f().mode === 'harmonized') { <p class="hint">Switch to Raw to choose satellites freely.</p> }
+</section>
+
+<section aria-labelledby="h-type">
+  <h3 id="h-type">Thermal activity type</h3>
+  @for (t of typeLabels; track t; let i = $index) {
+    <label class="chk"><input type="checkbox" [checked]="has('types', i)" (change)="toggle('types', i)" />
+      <svg width="12" height="12" viewBox="0 0 32 32" aria-hidden="true" class="shape">
+        @switch (i) {
+          @case (0) { <circle cx="16" cy="16" r="12" /> }
+          @case (1) { <path d="M16 3 L29 27 L3 27 Z" /> }
+          @case (2) { <rect x="6" y="6" width="20" height="20" /> }
+          @default { <path d="M16 2 L30 16 L16 30 L2 16 Z" /> }
+        }
+      </svg>{{ t }}</label>
+  }
+</section>
+
+<section aria-labelledby="h-ts">
+  <h3 id="h-ts">Type source</h3>
+  <div class="seg three" role="radiogroup" aria-labelledby="h-ts">
+    @for (t of [['all', 'All'], ['firms', 'FIRMS'], ['inferred', 'Calculated *']]; track t[0]) {
+      <button type="button" role="radio" [attr.aria-checked]="f().typeSource === t[0]" [class.on]="f().typeSource === t[0]" (click)="setTypeSource(t[0])">{{ t[1] }}</button>
+    }
+  </div>
+  <p class="hint">FIRMS: type delivered with the data (standard processing). Calculated: near-real-time detections{{ available().nrt_first ? ' (from ' + available().nrt_first + ')' : '' }}, typed from each location's history.</p>
+</section>
+
+<section aria-labelledby="h-conf">
+  <h3 id="h-conf">Confidence</h3>
+  <div class="row">
+    @for (c of ['low', 'nominal', 'high']; track c) {
+      <label class="chk inline"><input type="checkbox" [checked]="has('conf', c)" (change)="toggle('conf', c)" />{{ c }}</label>
+    }
+  </div>
+  <p class="hint">MODIS: low &lt;30, nominal 30–79, high ≥80. VIIRS: native l/n/h.</p>
+</section>
+
+<section aria-labelledby="h-dn">
+  <h3 id="h-dn">Day / night</h3>
+  <div class="row">
+    <label class="chk inline"><input type="checkbox" [checked]="has('daynight', 'D')" (change)="toggle('daynight', 'D')" />Day</label>
+    <label class="chk inline"><input type="checkbox" [checked]="has('daynight', 'N')" (change)="toggle('daynight', 'N')" />Night</label>
+  </div>
+</section>
+
+<section aria-labelledby="h-frp">
+  <h3 id="h-frp">Fire radiative power <span class="muted">{{ frpText() }}</span></h3>
+  <div class="dual">
+    <input type="range" min="0" max="100" [value]="frpLo()" aria-label="Minimum FRP" (change)="setFrp('lo', $any($event.target).value)" />
+    <input type="range" min="0" max="100" [value]="frpHi()" aria-label="Maximum FRP" (change)="setFrp('hi', $any($event.target).value)" />
+  </div>
+</section>
+
+<section aria-labelledby="h-hour">
+  <h3 id="h-hour">Acquisition hour (UTC) <span class="muted">{{ f().hourMin }}:00 – {{ f().hourMax }}:59</span></h3>
+  <div class="dual">
+    <input type="range" min="0" max="23" [value]="f().hourMin" aria-label="Earliest acquisition hour" (change)="setHour('lo', $any($event.target).value)" />
+    <input type="range" min="0" max="23" [value]="f().hourMax" aria-label="Latest acquisition hour" (change)="setHour('hi', $any($event.target).value)" />
+  </div>
+  <p class="hint">Separates morning (Terra) from afternoon (Aqua, VIIRS) overpasses.</p>
+</section>
+
+<section aria-labelledby="h-reg">
+  <h3 id="h-reg">{{ countryView() ? 'Area' : 'Region' }}</h3>
+  @if (countryView()) {
+    <p class="hint">{{ countryName() ? 'Detections inside ' + countryName() + ' (Natural Earth border). The timeline counts the box around it.' : 'Choose a country above.' }}</p>
+  } @else {
+    <select (change)="setRegion($any($event.target).value)" aria-labelledby="h-reg">
+      <option value="all" [selected]="f().region === 'all'">All available</option>
+      @for (r of available().regions; track r.name) { <option [value]="r.name" [selected]="f().region === r.name">{{ r.label }}</option> }
+      <option value="visible" [selected]="f().region === 'visible'">Visible map area</option>
+    </select>
+  }
+  <button type="button" class="wide" (click)="calendar.emit()">View burn calendar for {{ countryName() ?? 'this area' }} →</button>
+</section>
+
+<section aria-labelledby="h-base">
+  <h3 id="h-base">Base layer</h3>
+  <div class="seg three" role="radiogroup" aria-labelledby="h-base">
+    @for (b of [['imagery', 'Satellite'], ['night', 'Night lights'], ['streets', 'Streets']]; track b[0]) {
+      <button type="button" role="radio" [attr.aria-checked]="base() === b[0]" [class.on]="base() === b[0]" (click)="setBase(b[0])">{{ b[1] }}</button>
+    }
+  </div>
+</section>
+
+<section aria-labelledby="h-leg">
+  <h3 id="h-leg">Legend</h3>
+  <app-legend [aggregated]="aggregated()" />
+</section>
+
+<button type="button" class="wide ghost" (click)="reset()">Reset filters</button>

@@ -1,0 +1,93 @@
+/* SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. */
+/* Layout of the design sketches (ui-design/map-view.png and country-view.png). Colours: src/theme.css. */
+:host {
+  --side-w: clamp(300px, 20.5vw, 400px);
+  --tl-h: 202px; /* timeline: 50px toolbar + 152px histogram and axis (timeline.component.css) */
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  background: var(--c-map-bg); color: var(--c-panel-ink); font-family: var(--c-font);
+}
+
+/* Global: map | sidebar on top, timeline | download sidebar below.
+   Closing a sidebar gives its cell to the map (or to the timeline). */
+.body {
+  flex: 1; min-height: 0; display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  grid-template-rows: minmax(0, 1fr) var(--tl-h);
+  grid-template-areas: "map side" "tl dl";
+}
+.body.side-closed { grid-template-areas: "map map" "tl dl"; }
+.body.dl-closed { grid-template-areas: "map side" "tl side"; }
+.body.side-closed.dl-closed { grid-template-areas: "map map" "tl tl"; }
+
+/* By Country: sidebar on the left, full height; map and timeline on the right. */
+.body.country { grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-areas: "side map" "side tl"; }
+.body.country.side-closed { grid-template-areas: "map map" "tl tl"; }
+
+.map-cell { grid-area: map; position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--c-map-bg); }
+.tl-cell { grid-area: tl; position: relative; min-width: 0; min-height: 0; }
+.side { grid-area: side; }
+.dl { grid-area: dl; }
+
+.panel {
+  background: var(--c-panel); color: var(--c-panel-ink); overflow-y: auto; min-height: 0;
+  border-left: 1px solid var(--c-panel-edge);
+}
+.dl { border-top: 1px solid var(--c-panel-edge); }
+.body.country .side { border-left: 0; border-right: 1px solid var(--c-panel-edge); }
+.panel-title { margin: 0; padding: 22px 24px 10px; font-size: 1.15rem; font-weight: 500; text-align: center; }
+.body.country .panel-title { text-align: left; padding-left: 44px; }
+.panel-empty { padding: 0 24px; color: var(--c-panel-muted); }
+.country-pick { padding: 0 14px 8px; font-size: .8rem; }
+.country-pick h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c-panel-muted); }
+.country-pick select { width: 100%; font: inherit; font-size: .78rem; background: var(--c-panel-input); color: var(--c-panel-ink); border: 1px solid var(--c-panel-line); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+.country-pick select:disabled { color: var(--c-panel-muted); cursor: default; }
+.country-pick select:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 1px; }
+.country-pick .hint, .summary .hint { margin: 4px 0 0; color: var(--c-panel-muted); font-size: .72rem; line-height: 1.35; }
+/* selection summary (step 9c): same section style as the filters below it */
+.summary { padding: 0 14px 10px; font-size: .8rem; }
+.summary h3 { margin: 0 0 6px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c-panel-muted); }
+
+/* Collapse tabs: slim pull-tabs attached to the edge of their sidebar, rounded only on the side facing the map,
+   with a soft shadow onto the map. The chevron points left (.tri) or right (.tri.flip) and turns when the sidebar
+   opens or closes. */
+.tab {
+  position: absolute; z-index: 4; width: 28px; display: grid; place-items: center; padding: 0; cursor: pointer;
+  background: var(--c-tab); color: var(--c-tab-ink); border: 0; border-radius: 10px 0 0 10px;
+  box-shadow: -2px 1px 6px var(--c-tab-shadow);
+  transition: background-color .15s ease, color .15s ease;
+}
+.tab:hover { background: var(--c-tab-hover); color: var(--c-accent); }
+.tab:focus-visible { outline: 2px solid var(--c-focus); outline-offset: -2px; }
+.side-tab { top: 17px; right: 0; height: 76px; }
+.body.country .side-tab { right: auto; left: 0; border-radius: 0 10px 10px 0; box-shadow: 2px 1px 6px var(--c-tab-shadow); }
+.dl-tab { top: 18px; right: 0; height: 52px; }
+.tri { display: block; width: 18px; height: 18px; transition: transform .2s ease; }
+.tri svg { display: block; width: 100%; height: 100%; }
+.tri.flip { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .tab, .tri { transition: none; } }
+
+.toast, .badge {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 2; font-size: .8rem;
+  background: var(--c-overlay); color: var(--c-overlay-ink); border: 1px solid var(--c-overlay-line); border-radius: 8px; padding: 6px 12px;
+}
+.toast { top: 12px; }
+.toast.err { border-color: var(--c-err); }
+.toast button { background: none; border: 0; color: inherit; font-size: 1rem; cursor: pointer; }
+.badge { bottom: 30px; color: var(--c-overlay-muted); max-width: 70%; text-align: center; }
+.tl-placeholder { height: 100%; display: grid; place-items: center; color: var(--c-bar-muted); background: var(--c-bar); }
+
+@media (max-width: 900px) {
+  /* Phones: map and timeline take the whole width; sidebars become bottom sheets over the map. */
+  :host { --side-w: 100vw; }
+  .body, .body.country, .body.side-closed, .body.dl-closed, .body.country.side-closed {
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: "map" "tl";
+  }
+  .panel { position: fixed; left: 0; right: 0; bottom: 0; height: 60%; z-index: 10; border: 0; border-top: 1px solid var(--c-panel-edge); border-radius: 12px 12px 0 0; }
+  .side-tab { height: 60px; width: 32px; }
+  /* the country tab moves to the right edge on phones, so it is shaped like the global one again */
+  .body.country .side-tab { left: auto; right: 0; border-radius: 10px 0 0 10px; box-shadow: -2px 1px 6px var(--c-tab-shadow); }
+  .dl-tab { height: 44px; width: 32px; }
+}
+/* keep the map's zoom buttons clear of the left collapse tab in the country view (tab width) */
+.body.country:not(.side-closed) .map-cell ::ng-deep .maplibregl-ctrl-top-left,
+.body.country.side-closed .map-cell ::ng-deep .maplibregl-ctrl-top-left { left: 28px; }

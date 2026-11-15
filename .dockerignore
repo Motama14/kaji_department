@@ -1,0 +1,6 @@
+*
+!api/
+!pipeline/
+!requirements-api.txt
+**/__pycache__
+**/*.pyc

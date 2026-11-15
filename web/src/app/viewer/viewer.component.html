@@ -1,0 +1,79 @@
+<!-- SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. -->
+<app-top-bar [loading]="loading()" />
+
+<div class="body" [class.country]="isCountry()" [class.side-closed]="!state.panelOpen()"
+     [class.dl-closed]="isCountry() || !state.downloadOpen()">
+
+  <div class="map-cell">
+    <app-map [data]="shown()" [country]="country()" (mapClick)="onMapClick($event)" />
+
+    @if (error()) {
+      <div class="toast err" role="alert">{{ error() }} <button type="button" (click)="error.set(null)" aria-label="Dismiss">×</button></div>
+    } @else if (isCountry() && !country()) {
+      <div class="toast" role="status">Choose a country in the sidebar or click one on the map.</div>
+    } @else if (!loading() && shown() && shown()!.count === 0) {
+      <div class="toast" role="status">No detections {{ country() ? 'in ' + country()!.name + ' ' : '' }}for this date and filters.</div>
+    }
+    @if (aggregated()) {
+      <div class="badge" role="status">Too many detections to draw individually — showing a {{ $any(data()).cell_deg }}° grid. Zoom in or narrow the window.</div>
+    }
+
+    <button type="button" class="tab side-tab" (click)="togglePanel()" [attr.aria-expanded]="state.panelOpen()"
+            aria-controls="side-panel" [attr.aria-label]="state.panelOpen() ? 'Hide filters and information' : 'Show filters and information'"
+            [title]="state.panelOpen() ? 'Hide filters and information' : 'Show filters and information'">
+      <span class="tri" [class.flip]="isCountry() ? !state.panelOpen() : state.panelOpen()" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5" /></svg></span>
+    </button>
+  </div>
+
+  @if (state.panelOpen()) {
+    <aside id="side-panel" class="panel side" aria-label="Filters and information">
+      <h2 class="panel-title">Filters and Information</h2>
+      @if (isCountry()) {
+        <section class="country-pick" aria-labelledby="h-country">
+          <h3 id="h-country">Country</h3>
+          @if (countries(); as list) {
+            <select aria-labelledby="h-country" (change)="selectCountry($any($event.target).value)">
+              <option value="" [selected]="!country()">Choose a country…</option>
+              @for (c of list; track c.id) { <option [value]="c.id" [selected]="country()?.id === c.id">{{ c.name }}</option> }
+            </select>
+            <p class="hint">Or click a country on the map. Borders: Natural Earth (1:50m).</p>
+          } @else {
+            <select disabled aria-labelledby="h-country"><option>{{ countriesError() ? 'Borders not available' : 'Loading borders…' }}</option></select>
+          }
+        </section>
+      }
+      <section class="summary" aria-labelledby="h-summary">
+        <h3 id="h-summary">Selection summary</h3>
+        <app-summary [data]="shown()" [scope]="summaryScope()" [border]="!!country()" />
+      </section>
+      @if (available(); as a) {
+        <app-filters-panel [available]="a" [aggregated]="aggregated()" [countryName]="country()?.name ?? null"
+                           [countryView]="isCountry()" (calendar)="openCalendar()" (fitRegion)="fitRegion($event)" />
+      } @else {
+        <p class="panel-empty">Loading…</p>
+      }
+    </aside>
+  }
+
+  <div class="tl-cell">
+    @if (available(); as a) {
+      <app-timeline [available]="a" [reserveRight]="!isCountry()" />
+    } @else {
+      <div class="tl-placeholder">Loading available dates…</div>
+    }
+    @if (!isCountry()) {
+      <button type="button" class="tab dl-tab" (click)="toggleDownload()" [attr.aria-expanded]="state.downloadOpen()"
+              aria-controls="download-panel" [attr.aria-label]="state.downloadOpen() ? 'Hide download data' : 'Show download data'"
+              [title]="state.downloadOpen() ? 'Hide download data' : 'Show download data'">
+        <span class="tri" [class.flip]="state.downloadOpen()" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5" /></svg></span>
+      </button>
+    }
+  </div>
+
+  @if (!isCountry() && state.downloadOpen()) {
+    <aside id="download-panel" class="panel dl" aria-label="Download data">
+      <h2 class="panel-title">Download Data</h2>
+      <app-download-panel [visibleBbox]="visibleBbox()" />
+    </aside>
+  }
+</div>

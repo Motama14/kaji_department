@@ -195,23 +195,24 @@ data/
 
 ## 6. Web app
 
-> **Do not change the visual design for now.** The user will provide **design references later**. Until then, keep the web app as it is in the prep folder (functionality, views and stack) and only connect it to the new data. No visual polish or redesigns on your own initiative.
+> **The visual design follows the user's sketches in `ui-design/`** (step 9; palette tokens in `web/src/theme.css`). Propose any visual change before making it; no polish or redesigns on your own initiative.
 
 ### Recommended stack
 - **Backend:** Python + **FastAPI** + **DuckDB** (spatial extension) reading Parquet. No separate database.
 - **Frontend:** **Angular** (the user knows it well) with **Leaflet + leaflet-draw** (draw polygon, enter coordinates).
 - Precompute the aggregated table by cell and month: a polygon's calendar is a sum of cells, and only the CSV queries the raw points.
 
-### Views (implemented in preparation)
-- `/` **global hot spot viewer** (MapLibre GL + daily timeline + filters). Its spec is in the `SKILL.md` skill (hotspot-map-viewer) at the prep root: always use it when touching the map, timeline, filters or `/api/hotspots`.
-- `/calendar` **burning calendar**, anomalies and CSV (Leaflet to draw the area). Opened from the viewer with `?bbox=`.
+### Views
+- `/` **hot spot viewer** (MapLibre GL + daily timeline + filters + selection summary), with a **Global** view and a **By Country** view (Natural Earth 1:50m borders, `web/public/countries.geojson` from `pipeline/countries.py`; country picked in the list or on the map, rest of the world dimmed, detections cut to the border in the browser). Its spec is the `hotspot-map-viewer` skill in `.claude/skills/`: always use it when touching the map, timeline, filters or `/api/hotspots`.
+- `/calendar` **burning calendar**, anomalies and CSV (Leaflet to draw the area). Opened from the viewer with `?bbox=` or `?country=ADM0_A3`.
 - Viewer endpoints: `GET /api/available-dates`, `GET /api/hotspots`, `GET /api/timeline-histogram`.
 
 ### Features by priority
 1. **Burning calendar:** heatmap of years (rows, 2000 to present) × months (columns), accessible ramp (**viridis/cividis**).
 2. **Anomalies:** current month vs. historical median for that month (and percentiles); anomaly view with a **colorblind-safe diverging ramp**.
 3. **CSV download** of the query's points, with source sensor and harmonized value.
-- **Required (user, step 5):** wherever NRT data appears (calendar months, anomaly, map, CSV), show a warning that the hot-spot type was **calculated** (inferred from the SP history) because the data did not originally include it. Use `n_type_inferred` in the cell table; the CSV gets a `type_source` column.
+- **Required (user, step 5):** wherever NRT data appears (calendar months, anomaly, map, CSV), show a warning that the hot-spot type was **calculated** (inferred from the SP history) because the data did not originally include it. Use `n_type_inferred` in the cell table; the CSV gets a `type_source` column. Done in step 8 (calendar asterisk + note, anomaly cards, viewer notice and popup, CSV `type_source`).
+- **Partial current month (user, step 8):** the last data month shows its real count, flagged as partial; its anomaly uses the historical values pro-rated to the covered days.
 4. Optional: NRT data via the FIRMS API for the current month; volcano and static-source layer.
 
 ### Indicative endpoints
@@ -256,9 +257,9 @@ data/
 - [x] Step 4: full conversion to Parquet (`data/processed/hotspots/`: 660.7 M rows, 10.8 GB, audited against the inventory).
 - [x] Step 5: cleaning and aggregation (`pipeline/aggregate.py`; `cell_month_g0.25.parquet`, static mask, coverage table; results in `docs/DATA.md`).
 - [x] Steps 6–7: calibration decisions, calibration and validation (`pipeline/calibrate.py`; results in `docs/RESULTS.md`).
-- [ ] Step 8: API and web app connected to the new data.
-- [ ] Step 9: design with the user's references.
-- [ ] Step 10: deploy (API → Google Cloud, web → GitHub).
+- [x] Step 8: API and web app connected to the new data (`pipeline/publish.py`, `api/`, `web/`, `tests/`; run it with `docs/RUNBOOK.md`).
+- [x] Step 9: design with the user's references (9a layout/palette/download, 9b By Country, 9c summary + type-source filter, collapse-tab restyle; approved by the user 2026-11-15).
+- [x] Step 10: deploy (API → Google Cloud, web → GitHub). Handled by the user (2026-11-15); container files prepared in the repo (`docs/RUNBOOK.md`).
 - [ ] 2026 / NRT data for the "current month".
 - [ ] Submission.
 

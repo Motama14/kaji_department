@@ -1,0 +1,99 @@
+<!-- SI-assisted: written with Claude Code (Anthropic LLM) under the author's direction and reviewed by the author. -->
+<div class="toolbar" role="toolbar" aria-label="Timeline controls" [class.reserve]="reserveRight()">
+  <span class="label">TIMEFRAME</span>
+
+  <div class="picker-wrap">
+    <button type="button" class="pill" (click)="togglePicker()" [attr.aria-expanded]="pickerOpen()" aria-haspopup="dialog"
+            aria-controls="time-picker" title="Visible stretch of the timeline · date jumps · map window">
+      <span><span class="pl">Time Picker (</span>{{ pickerText() }}<span class="pl">)</span></span><span class="caret" aria-hidden="true"></span>
+    </button>
+
+    @if (pickerOpen()) {
+      <div id="time-picker" class="pop" role="dialog" aria-label="Time picker">
+        <section>
+          <h4>Show on the timeline</h4>
+          <div class="row">
+            <button type="button" (click)="preset(31)">Last month</button>
+            <button type="button" (click)="preset(366)">Last year</button>
+            <button type="button" (click)="preset(1827)">Last 5 years</button>
+            <button type="button" (click)="preset('all')">All data</button>
+          </div>
+          <div class="row">
+            <label>From <input type="date" [value]="visibleFrom()" [min]="available().first" [max]="available().last"
+                               (change)="onVisibleFrom($any($event.target).value)" aria-label="Timeline visible from" /></label>
+            <label>to <input type="date" [value]="visibleTo()" [min]="available().first" [max]="available().last"
+                             (change)="onVisibleTo($any($event.target).value)" aria-label="Timeline visible to" /></label>
+          </div>
+        </section>
+
+        <section>
+          <h4>Go to date</h4>
+          <div class="row">
+            <select (change)="onYear($any($event.target).value)" aria-label="Jump to year">
+              @for (y of available().years; track y) { <option [value]="y" [selected]="y === year()">{{ y }}</option> }
+            </select>
+            <select (change)="onMonth($any($event.target).value)" aria-label="Jump to month">
+              @for (m of months; track m; let i = $index) { <option [value]="i + 1" [selected]="i + 1 === month()">{{ m }}</option> }
+            </select>
+            <input class="typed" type="text" [value]="typed()" inputmode="numeric" placeholder="DD/MM/YYYY"
+                   aria-label="Go to date (DD/MM/YYYY)" (keydown.enter)="onTyped($any($event.target).value)"
+                   (blur)="onTyped($any($event.target).value)" />
+            <input type="date" [value]="date()" [min]="available().first" [max]="available().last"
+                   aria-label="Pick a date" (change)="onPicker($any($event.target).value)" />
+            <button type="button" (click)="latest()" title="Latest available date">Latest</button>
+          </div>
+        </section>
+
+        <section>
+          <h4>Map shows</h4>
+          <div class="row" role="radiogroup" aria-label="Display window">
+            @for (w of [['day', 'Day'], ['7d', '7 days'], ['month', 'Month']]; track w[0]) {
+              <button type="button" role="radio" [attr.aria-checked]="window() === w[0]" [class.on]="window() === w[0]"
+                      (click)="setWindow(w[0])">{{ w[1] }}</button>
+            }
+          </div>
+        </section>
+      </div>
+    }
+  </div>
+
+  @if (markerVisible()) {
+    <span class="marker-label" [style.left.px]="selX()" aria-hidden="true">{{ isLatest() ? 'Latest' : dateLabel() }}</span>
+  }
+
+  <div class="ctrls">
+    <button type="button" (click)="step(-1)" aria-label="Previous day" title="Previous day (←)">⏮</button>
+    <button type="button" class="play" (click)="togglePlay()" [attr.aria-label]="playing() ? 'Pause' : 'Play'"
+            [attr.aria-pressed]="playing()" title="Play / pause (space)">{{ playing() ? '⏸' : '▶' }}</button>
+    <button type="button" (click)="step(1)" aria-label="Next day" title="Next day (→)">⏭</button>
+    <select (change)="setSpeed($any($event.target).value)" aria-label="Playback speed (steps per second)" title="Playback speed">
+      @for (s of speeds; track s) { <option [value]="s" [selected]="s === speed()">{{ s }}×</option> }
+    </select>
+    <span class="gap"></span>
+    <button type="button" (click)="zoom(1 / 1.6)" aria-label="Zoom timeline in" title="Zoom in">＋</button>
+    <button type="button" (click)="zoom(1.6)" aria-label="Zoom timeline out" title="Zoom out">－</button>
+    @if (loadingHist()) { <span class="spin" aria-label="Loading counts"></span> }
+  </div>
+</div>
+
+<div #box class="track" tabindex="0" aria-label="Timeline: click a day, drag to pan, scroll to zoom"
+     (wheel)="onWheel($event)" (pointerdown)="onDown($event)" (pointermove)="onMove($event)"
+     (pointerup)="onUp($event)" (pointercancel)="onUp($event)">
+  <svg [attr.width]="width()" [attr.height]="H + AX" aria-hidden="true">
+    <rect x="0" y="0" [attr.width]="width()" [attr.height]="H" class="band" />
+    <rect x="0" y="0" [attr.width]="noDataLeft()" [attr.height]="H" class="nodata" />
+    <rect [attr.x]="noDataRight()" y="0" [attr.width]="Math.max(0, width() - noDataRight())" [attr.height]="H" class="nodata" />
+    @if (winRect(); as r) { <rect [attr.x]="r.x" y="0" [attr.width]="r.w" [attr.height]="H" class="win" /> }
+    @for (b of bars(); track b.t) {
+      <rect [attr.x]="b.x" [attr.y]="H - b.h" [attr.width]="b.w" [attr.height]="b.h" class="bar"><title>{{ barTitle(b) }}</title></rect>
+    }
+    @for (t of ticks(); track t.x) {
+      <line [attr.x1]="t.x" [attr.x2]="t.x" [attr.y1]="H" [attr.y2]="H + (t.major ? 9 : 5)" class="tick" [class.major]="t.major" />
+      @if (t.label) { <text [attr.x]="t.x + 3" [attr.y]="H + (t.major ? 38 : 24)" class="lbl" [class.major]="t.major">{{ t.label }}</text> }
+    }
+    <line [attr.x1]="selX()" [attr.x2]="selX()" y1="0" [attr.y2]="H + AX" class="sel" />
+  </svg>
+  @if (countryBox(); as cb) {
+    <span class="area-tag" title="The timeline counts detections in the box around the country; the map and the summary use the border.">Box around {{ cb.name }}</span>
+  }
+</div>
