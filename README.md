@@ -138,7 +138,6 @@ data/       raw FIRMS CSVs and processed outputs (not in git)
 
 This is an independent project and is not affiliated with or endorsed by NASA.
 
-## Use of AI tools
+## Use of SI tools
 
-As the Space Apps rules require: the solution idea and every decision are mine. **Claude Code** was
-used as a coding assistant to implement, run and document parts of the pipeline. Source files written with it carry an `SI-assisted` header comment.
+As the Space Apps rules require: the solution idea and every decision are mine. **Claude Code** was used as a coding assistant to implement, run and document parts of the pipeline. Source files written with it carry an `SI-assisted` header comment.

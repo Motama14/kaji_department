@@ -98,7 +98,7 @@ The user wants to give input before every advance. Therefore:
 - **Archive Download** (custom area, dates and format): https://firms.modaps.eosdis.nasa.gov/download/ — **the hackathon data comes from here**.
   - Mixes standard processing (SP, `fire_archive_*` files) and near-real-time (NRT, `fire_nrt_*` files). SP replaces NRT with a delay of several months.
 - **Annual per-country summaries**: https://firms.modaps.eosdis.nasa.gov/country/ (used during preparation).
-- **FIRMS API** (requires a free **MAP_KEY**): for recent NRT data and the "current month" feature.
+- **FIRMS API** (requires a free **MAP_KEY**): for recent NRT data. Not used: the "current month" feature was dropped (user, 2026-11-15).
 - Use **SP (standard processing)** data for the historical series. NRT only for the recent stretch that has no SP yet.
 
 ### Hackathon data (downloaded by the user)
@@ -213,7 +213,7 @@ data/
 3. **CSV download** of the query's points, with source sensor and harmonized value.
 - **Required (user, step 5):** wherever NRT data appears (calendar months, anomaly, map, CSV), show a warning that the hot-spot type was **calculated** (inferred from the SP history) because the data did not originally include it. Use `n_type_inferred` in the cell table; the CSV gets a `type_source` column. Done in step 8 (calendar asterisk + note, anomaly cards, viewer notice and popup, CSV `type_source`).
 - **Partial current month (user, step 8):** the last data month shows its real count, flagged as partial; its anomaly uses the historical values pro-rated to the covered days.
-4. Optional: NRT data via the FIRMS API for the current month; volcano and static-source layer.
+4. Optional: volcano and static-source layer. (NRT data via the FIRMS API for the current month: dropped by the user, 2026-11-15.)
 
 ### Indicative endpoints
 - `POST /api/calendar` → {polygon or bbox, date range} → harmonized year × month matrix.
@@ -260,8 +260,9 @@ data/
 - [x] Step 8: API and web app connected to the new data (`pipeline/publish.py`, `api/`, `web/`, `tests/`; run it with `docs/RUNBOOK.md`).
 - [x] Step 9: design with the user's references (9a layout/palette/download, 9b By Country, 9c summary + type-source filter, collapse-tab restyle; approved by the user 2026-11-15).
 - [x] Step 10: deploy (API → Cloud Run, web → Firebase Hosting). Handled by the user (2026-11-15); container files and the cold-start fix (small tables in the image, `serving_facts.json`) in the repo (`docs/RUNBOOK.md`, `cloud-run-deploy` skill).
-- [ ] 2026 / NRT data for the "current month".
-- [ ] Submission.
+- [x] Step 10 follow-ups (2026-11-15): detections file list, query time limit, area timeline table (always monthly bars), `--min-instances 1`.
+- [—] FIRMS API "current month": **dropped (user, 2026-11-15)**, only MODIS NRT was obtainable and MODIS is being retired. The partial last month from the downloaded NRT files stays.
+- [x] Project complete (user, 2026-11-15).
 
 ---
 
