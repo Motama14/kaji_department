@@ -9,7 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FIRE_HOTSPOTS_DIR=/data/hotspots \
     FIRE_TMP_DIR=/tmp/duckdb \
     DUCKDB_MEMORY_LIMIT=2GB \
-    DUCKDB_THREADS=2
+    DUCKDB_THREADS=8
+# 8 threads on 2 vCPU on purpose (step 10b): reads through the bucket mount wait on the network, so more threads
+# keep more small reads in flight; CPU is not the bottleneck.
 
 WORKDIR /app
 

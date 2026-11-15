@@ -39,6 +39,11 @@ def con():
     with _lock:
         if _con is None:
             c = config.connect()
+            # Cloud Run (step 10b): the detections are read through the bucket mount, which DuckDB sees as local
+            # files and does not cache by default. Keep their Parquet footers and read blocks in memory between
+            # queries (inside memory_limit; evicted first when memory is needed).
+            c.execute("SET parquet_metadata_cache=true")
+            c.execute("SET cache_local_files=true")
             c.execute("INSTALL spatial; LOAD spatial")
             h = config.sql_path(config.harmonized_path())
             c.execute(f"CREATE VIEW harmonized AS SELECT * FROM read_parquet('{h}')")
